@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import clsx from "clsx";
 import { supabase } from "@/lib/supabaseClient";
+import Link from "next/link";
 import BottomBar from "@/components/BottomBar";
 import {
   Calendar,
@@ -16,6 +15,7 @@ import {
   Bookmark,
   Sparkles,
 } from "lucide-react";
+import clsx from "clsx";
 
 /* ======================== Types ======================== */
 type Profile = {
@@ -92,7 +92,6 @@ function TabsBar({
   onChange: (id: string) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     const el = trackRef.current;
     if (!el) return;
@@ -137,143 +136,134 @@ function TabsBar({
 
 /* ======================== Page ======================== */
 export default function ProfilePage() {
-  // AUTH STATE yang stabil
+  // auth state
   const [authUser, setAuthUser] = useState<any>(null);
   const [authReady, setAuthReady] = useState(false);
 
-  // data
+  // data state
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [novels, setNovels] = useState<Novel[]>([]);
   const [drafts, setDrafts] = useState<any[]>([]);
   const [bookmarks, setBookmarks] = useState<Novel[]>([]);
   const [counts, setCounts] = useState({ novels: 0, drafts: 0, bookmarks: 0 });
+  const [tab, setTab] = useState<"overview" | "bookmarks" | "works" | "drafts" | "settings">(
+    "overview"
+  );
 
-  const [tab, setTab] =
-    useState<"overview" | "bookmarks" | "works" | "drafts" | "settings">("overview");
-
-  // 1) Ambil sesi awal + subscribe perubahan
+  // ---- Auth bootstrap (non-blocking) ----
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
+    setAuthReady(true); // jangan blok UI
 
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!mounted) return;
+    // ambil sesi awal
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
       setAuthUser(data.session?.user ?? null);
-      setAuthReady(true);
-    })();
+    });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+    // subscribe perubahan
+    const { data: sub } = supabase.auth.onAuthStateChange((_ev, session) => {
+      if (cancelled) return;
       setAuthUser(session?.user ?? null);
     });
 
+    // kalau query ?code/error nyasar, lempar ke /auth/callback
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      if ((u.searchParams.get("code") || u.searchParams.get("error_code")) && !u.pathname.startsWith("/auth/callback")) {
+        window.location.href = `/auth/callback${u.search}`;
+      }
+    }
+
+    // safety timer (kalau promise hang)
+    const t = setTimeout(() => setAuthReady(true), 1500);
+
     return () => {
-      mounted = false;
+      cancelled = true;
+      clearTimeout(t);
       sub.subscription.unsubscribe();
     };
   }, []);
 
-  // 2) Muat profil & data ketika user tersedia
+  // ---- Load data profil dkk ----
   useEffect(() => {
-    if (!authUser) {
-      setProfile(null);
-      setNovels([]);
-      setDrafts([]);
-      setBookmarks([]);
-      setCounts({ novels: 0, drafts: 0, bookmarks: 0 });
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
     (async () => {
+      if (!authReady) return;
       setLoading(true);
       try {
-        try {
-          await supabase.rpc("ensure_profile");
-        } catch {}
+        const { data: { user } } = await supabase.auth.getUser();
+        setAuthUser(user ?? null);
+        if (!user) return;
 
+        // ensure profile
+        try { await supabase.rpc("ensure_profile"); } catch {}
+
+        // upsert minimal profile
         let { data: p } = await supabase
           .from("profiles")
           .select("*")
-          .eq("id", authUser.id)
+          .eq("id", user.id)
           .maybeSingle();
 
         if (!p) {
-          const fallbackName =
-            authUser.user_metadata?.full_name || authUser.email?.split("@")[0] || "User";
-          const handle = (fallbackName || "user")
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .slice(0, 16);
-          const avatar_url = authUser.user_metadata?.avatar_url || null;
+          const fallbackName = user.user_metadata?.full_name || user.email?.split("@")[0] || "User";
+          const handle = (fallbackName || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 16);
+          const avatar_url = user.user_metadata?.avatar_url || null;
           const { data: inserted } = await supabase
             .from("profiles")
-            .upsert({ id: authUser.id, name: fallbackName, handle, avatar_url })
+            .upsert({ id: user.id, name: fallbackName, handle, avatar_url })
             .select("*")
             .single();
           p = inserted as any;
         }
-        if (cancelled) return;
         setProfile(p as Profile);
+        if (!p?.id) return;
 
         const [nv, df] = await Promise.all([
           supabase
             .from("novels")
             .select("id, slug, title, cover_url, status, created_at")
-            .eq("author_id", authUser.id)
+            .eq("author_id", p.id)
             .order("created_at", { ascending: false }),
           supabase
             .from("submissions")
             .select("id, title, cover_url, status, created_at")
-            .eq("author_id", authUser.id)
+            .eq("author_id", p.id)
             .order("created_at", { ascending: false }),
         ]);
 
+        setNovels(nv.data || []);
         const draftsAll = df.data || [];
+        setDrafts(draftsAll.filter((d) => d.status !== "approved"));
 
-        const bookmarked = await (async () => {
-          try {
-            const { data: rows } = await supabase
-              .from("bookmarks")
-              .select("novel_id")
-              .eq("user_id", authUser.id);
-            const ids = (rows || []).map((r: any) => r.novel_id);
-            if (!ids.length) return [] as Novel[];
+        let bookmarked: Novel[] = [];
+        try {
+          const { data: rows } = await supabase.from("bookmarks").select("novel_id").eq("user_id", p.id);
+          const ids = (rows || []).map((r: any) => r.novel_id);
+          if (ids.length) {
             const { data: nvs } = await supabase
               .from("novels")
               .select("id, slug, title, cover_url, status, created_at")
               .in("id", ids);
-            return (nvs || []) as Novel[];
-          } catch {
-            return [] as Novel[];
+            bookmarked = nvs || [];
           }
-        })();
-
-        if (cancelled) return;
-        setNovels(nv.data || []);
-        setDrafts(draftsAll.filter((d) => d.status !== "approved"));
+        } catch { bookmarked = []; }
         setBookmarks(bookmarked);
+
         setCounts({
           novels: (nv.data || []).length,
           drafts: draftsAll.filter((d) => d.status === "pending").length,
           bookmarks: bookmarked.length,
         });
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authUser]);
+  }, [authReady]);
 
   const displayName =
-    profile?.name ||
-    authUser?.user_metadata?.full_name ||
-    authUser?.email?.split("@")[0] ||
-    "Pengguna";
+    profile?.name || authUser?.user_metadata?.full_name || authUser?.email?.split("@")[0] || "Pengguna";
   const displayHandle =
     profile?.handle ||
     (displayName || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 16);
@@ -282,32 +272,18 @@ export default function ProfilePage() {
     authUser?.user_metadata?.avatar_url ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}`;
 
-  /* ======================== Render Guards ======================== */
-  if (!authReady) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-zinc-950 text-zinc-100">
-        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-sm">Memuat sesi…</span>
-        </div>
-        <BottomBar />
-      </div>
-    );
-  }
-
-  if (!authUser) {
+  // ---- Auth guard ringan (tanpa spinner abadi) ----
+  if (authReady && !authUser) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100">
         <main className="mx-auto max-w-7xl px-4 py-16 text-center">
           <div className="mx-auto w-[min(520px,92vw)] rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur">
             <User2 className="mx-auto h-10 w-10 text-zinc-400" />
             <h1 className="mt-3 text-xl font-bold">Kamu belum masuk</h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Masuk untuk melihat profil, karya, dan bookmark kamu.
-            </p>
+            <p className="mt-1 text-sm text-zinc-400">Masuk untuk melihat profil, karya, dan bookmark kamu.</p>
             <div className="mt-5">
               <button
-                onClick={() => supabase.auth.signInWithOAuth({ provider: "google" })}
+                onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback` } })}
                 className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500"
               >
                 Masuk dengan Google
@@ -360,16 +336,12 @@ export default function ProfilePage() {
               <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
                 <span className="inline-flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
-                  Bergabung{" "}
-                  {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : "—"}
+                  Bergabung {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : "—"}
                 </span>
                 <Link href="/write" className="inline-flex items-center gap-1 hover:underline">
                   <PenSquare className="h-4 w-4" /> Tulis karya baru
                 </Link>
-                <a
-                  className="inline-flex items-center gap-1 hover:underline"
-                  href={`https://openverse.example/u/${displayHandle}`}
-                >
+                <a className="inline-flex items-center gap-1 hover:underline" href={`https://openverse.example/u/${displayHandle}`}>
                   <ExternalLink className="h-4 w-4" /> Profil publik
                 </a>
               </div>
@@ -392,7 +364,7 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* ===== Tabs (scrollable) ===== */}
+        {/* ===== Tabs ===== */}
         <div className="mt-6">
           <TabsBar
             tabs={[
@@ -419,16 +391,11 @@ export default function ProfilePage() {
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
                 <h3 className="mb-2 text-sm font-semibold text-white/90">Link & Sosial</h3>
-                <a
-                  href={`https://openverse.example/u/${displayHandle}`}
-                  className="text-sm inline-flex items-center gap-2 hover:underline"
-                >
+                <a href={`https://openverse.example/u/${displayHandle}`} className="text-sm inline-flex items-center gap-2 hover:underline">
                   <ExternalLink className="h-4 w-4" />
                   Profil publik
                 </a>
-                <div className="mt-2 text-xs text-zinc-400">
-                  Kustomisasi URL akan ditambahkan nanti.
-                </div>
+                <div className="mt-2 text-xs text-zinc-400">Kustomisasi URL akan ditambahkan nanti.</div>
               </div>
             </div>
           )}
@@ -479,7 +446,7 @@ export default function ProfilePage() {
               {loading ? (
                 <CardGrid>
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="rounded-xl border border-white/10 overflow-hidden">
+                    <div key={i} className="rounded-XL border border-white/10 overflow-hidden">
                       <Skeleton className="aspect-[3/4] w-full" />
                       <div className="p-3">
                         <Skeleton className="h-4 w-2/3" />
@@ -496,11 +463,7 @@ export default function ProfilePage() {
                 </CardGrid>
               ) : (
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-zinc-400 backdrop-blur">
-                  Belum ada karya.{" "}
-                  <Link href="/write" className="text-sky-400 hover:underline">
-                    Tulis karya pertama
-                  </Link>
-                  .
+                  Belum ada karya. <Link href="/write" className="text-sky-400 hover:underline">Tulis karya pertama</Link>.
                 </div>
               )}
             </section>
@@ -509,22 +472,14 @@ export default function ProfilePage() {
           {/* Drafts */}
           {tab === "drafts" && (
             <section>
-              <h3 className="mb-2 text-sm font-semibold text-white/90">
-                Draft & Antrian Moderasi
-              </h3>
+              <h3 className="mb-2 text-sm font-semibold text-white/90">Draft & Antrian Moderasi</h3>
               {drafts.length ? (
                 <ul className="space-y-3">
                   {drafts.map((d) => (
-                    <li
-                      key={d.id}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur"
-                    >
+                    <li key={d.id} className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur">
                       <div className="flex items-start gap-3">
                         {d.cover_url ? (
-                          <img
-                            src={d.cover_url}
-                            className="h-16 w-12 rounded border border-white/10 object-cover"
-                          />
+                          <img src={d.cover_url} className="h-16 w-12 rounded border border-white/10 object-cover" />
                         ) : (
                           <div className="grid h-16 w-12 place-items-center rounded border border-white/10 bg-white/5 text-xs text-zinc-400">
                             No Cover
@@ -543,20 +498,14 @@ export default function ProfilePage() {
                 </ul>
               ) : (
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-zinc-400 backdrop-blur">
-                  Tidak ada draft. Ajukan dari halaman{" "}
-                  <Link href="/write" className="text-sky-400 hover:underline">
-                    Write
-                  </Link>
-                  .
+                  Tidak ada draft. Ajukan dari halaman <Link href="/write" className="text-sky-400 hover:underline">Write</Link>.
                 </div>
               )}
             </section>
           )}
 
           {/* Settings */}
-          {tab === "settings" && profile && (
-            <SettingsCard profile={profile} onChanged={setProfile} />
-          )}
+          {tab === "settings" && profile && <SettingsCard profile={profile} onChanged={setProfile} />}
         </div>
       </main>
 
