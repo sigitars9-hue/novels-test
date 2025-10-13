@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { TopBar } from "@/components/TopBar";
-import Editor from "@/components/RichEditor";
 import { supabase } from "@/lib/supabaseClient";
+import Editor from "@/components/RichEditor";
+import { Loader2, ArrowLeft, Save, Eye, Trash2 } from "lucide-react";
 
+/* ───────────────── Types ───────────────── */
 type Novel = {
   id: string;
   slug: string;
@@ -23,6 +24,7 @@ type Chapter = {
   updated_at?: string | null;
 };
 
+/* ───────────────── Page ───────────────── */
 export default function EditChapterPage() {
   const router = useRouter();
   const params = useParams(); // { slug, number }
@@ -36,6 +38,7 @@ export default function EditChapterPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [savedTick, setSavedTick] = useState<number>(0);
 
   // Ambil session (sama seperti halaman Write)
   useEffect(() => {
@@ -98,10 +101,9 @@ export default function EditChapterPage() {
       return;
     }
 
-    // Validasi seperti di Write: judul wajib, fallback bila kosong
     const titleTrim = (form.title || "").trim();
     const finalTitle = titleTrim.length > 0 ? titleTrim : `Bab ${number}`;
-    const finalContent = form.content ?? ""; // samakan dengan Write: tidak null
+    const finalContent = form.content ?? "";
 
     setBusy(true);
     const { error } = await supabase
@@ -114,8 +116,7 @@ export default function EditChapterPage() {
       setErr(error.message);
       return;
     }
-
-    router.push(`/read/${slug}/${number}`);
+    setSavedTick((t) => t + 1);
   }
 
   async function removeChapter() {
@@ -134,27 +135,26 @@ export default function EditChapterPage() {
     router.push(`/novel/${slug}`);
   }
 
+  /* ─────────────── UI mirip halaman WRITE: fullscreen, tanpa navbar ─────────────── */
   if (loading) {
     return (
-      <div>
-        <TopBar />
-        <main className="mx-auto max-w-3xl px-4 py-6">Memuat…</main>
+      <div className="min-h-screen bg-zinc-950 text-zinc-100">
+        <main className="mx-auto w-[min(900px,95vw)] px-4 py-8">
+          <div className="flex items-center gap-2 text-sm text-zinc-400">
+            <Loader2 className="h-4 w-4 animate-spin" /> Memuat…
+          </div>
+        </main>
       </div>
     );
   }
 
   if (!novel || !chapter) {
     return (
-      <div>
-        <TopBar />
-        <main className="mx-auto max-w-3xl px-4 py-6">
-          {err ? (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-              {err}
-            </div>
-          ) : (
-            "Data tidak ditemukan."
-          )}
+      <div className="min-h-screen bg-zinc-950 text-zinc-100">
+        <main className="mx-auto w-[min(900px,95vw)] px-4 py-8">
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+            {err ?? "Data tidak ditemukan."}
+          </div>
           <div className="mt-4">
             <Link href="/" className="text-sky-400 hover:underline">
               ← Kembali ke beranda
@@ -166,91 +166,114 @@ export default function EditChapterPage() {
   }
 
   return (
-    <div>
-      <TopBar />
-      <main className="mx-auto max-w-3xl px-4 py-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold">
-            Edit Bab {number} — <span className="opacity-80">{novel.title}</span>
-          </h2>
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      {/* Header minimal ala Write */}
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
+        <div className="mx-auto flex w-[min(1000px,96vw)] items-center gap-2 px-3 py-3">
+          <button
+            onClick={() => router.back()}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+          >
+            <ArrowLeft className="h-4 w-4" /> Kembali
+          </button>
+
+          <div className="ml-2 truncate text-sm text-zinc-300">
+            Edit Bab {number} • <span className="text-zinc-400">{novel.title}</span>
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
             <Link
               href={`/read/${slug}/${number}`}
-              className="text-sm text-zinc-300 hover:underline"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
             >
-              Pratinjau
+              <Eye className="h-4 w-4" /> Pratinjau
             </Link>
-            <Link href={`/novel/${slug}`} className="text-sm text-sky-400 hover:underline">
-              ← Kembali ke novel
-            </Link>
+            <button
+              onClick={save}
+              disabled={!isOwner || busy}
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Simpan
+            </button>
           </div>
         </div>
+      </header>
 
+      {/* Body editor ala Write */}
+      <main className="mx-auto w-[min(1000px,96vw)] px-3 py-5">
         {!isOwner && (
-          <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
+          <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
             Anda bukan author novel ini, perubahan tidak diizinkan.
           </div>
         )}
 
-        <form
-          className="mt-4 space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!busy) save();
-          }}
-        >
-          <label className="block text-xs text-zinc-400">Judul Bab</label>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgb(255,255,255,0.02)]">
+          <label className="mb-1 block text-xs text-zinc-400">Judul Bab</label>
           <input
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
             placeholder={`Judul bab (mis. Bab ${number})`}
             disabled={!isOwner || busy}
           />
 
-          <label className="block text-xs text-zinc-400">Konten</label>
-          {isOwner ? (
-            <Editor
-              value={form.content}
-              setValue={(v) => setForm({ ...form, content: v })}
-            />
-          ) : (
-            <textarea
-              value={form.content}
-              readOnly
-              className="h-72 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
-              placeholder="Isi bab…"
-            />
-          )}
+          <div className="mt-4">
+            <label className="mb-1 block text-xs text-zinc-400">Konten</label>
+            {isOwner ? (
+              <Editor
+                value={form.content}
+                setValue={(v) => setForm({ ...form, content: v })}
+              />
+            ) : (
+              <textarea
+                value={form.content}
+                readOnly
+                className="h-72 w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm"
+                placeholder="Isi bab…"
+              />
+            )}
+          </div>
 
-          {chapter.updated_at && (
-            <div className="text-xs text-zinc-500">
-              Terakhir diubah: {new Date(chapter.updated_at).toLocaleString()}
+          <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+            <div>
+              {chapter.updated_at && (
+                <>Terakhir diubah: {new Date(chapter.updated_at).toLocaleString()}</>
+              )}
+              {savedTick > 0 && (
+                <span className="ml-3 text-emerald-400">Tersimpan ✓</span>
+              )}
             </div>
-          )}
+            {err && <div className="text-red-400">{err}</div>}
+          </div>
+        </div>
+      </main>
 
-          {err && <div className="text-sm text-red-400">{err}</div>}
-
-          <div className="flex gap-2 pt-1">
+      {/* Bottom action bar ala Write */}
+      <div className="sticky bottom-0 z-40 border-t border-white/10 bg-zinc-950/80 backdrop-blur">
+        <div className="mx-auto flex w-[min(1000px,96vw)] items-center justify-between gap-3 px-3 py-3">
+          <div className="text-xs text-zinc-400">
+            Mengedit: <span className="text-zinc-300">{novel.title}</span> • Bab {number}
+          </div>
+          <div className="flex items-center gap-2">
             <button
-              type="submit"
-              disabled={!isOwner || busy}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500 disabled:opacity-60"
-            >
-              {busy ? "Menyimpan…" : "Simpan Perubahan"}
-            </button>
-
-            <button
-              type="button"
               onClick={removeChapter}
               disabled={!isOwner || busy}
-              className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/15 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-60"
             >
-              Hapus Bab
+              <Trash2 className="h-4 w-4" /> Hapus
+            </button>
+            <button
+              onClick={save}
+              disabled={!isOwner || busy}
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Simpan Perubahan
             </button>
           </div>
-        </form>
-      </main>
+        </div>
+      </div>
     </div>
   );
 }
