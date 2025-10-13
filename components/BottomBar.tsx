@@ -197,7 +197,7 @@ export default function BottomBar() {
 
         {/* PROFILE (kanan) */}
         <Link
-          href={(loggedIn ? "/profile" : "/login") as Route}
+          href={(loggedIn ? "/profile" : "/profile") as Route}
           prefetch={false}
           className={clsx(
             "flex min-w-0 flex-col items-center gap-1 rounded-lg px-2 py-1.5 transition-colors",
