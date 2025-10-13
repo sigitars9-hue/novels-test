@@ -21,7 +21,7 @@ import {
   BookOpen,
 } from "lucide-react";
 
-/* ───────────────── Rich Editor mini (contenteditable) ───────────────── */
+/* ─────────────── Rich Editor mini ─────────────── */
 function EditorToolbar({ exec }: { exec: (cmd: string, val?: string) => void }) {
   return (
     <div className="flex flex-wrap items-center gap-1 rounded-xl border border-white/10 bg-zinc-900/70 p-1">
@@ -60,22 +60,13 @@ function EditorToolbar({ exec }: { exec: (cmd: string, val?: string) => void }) 
 }
 
 function RichEditor({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (html: string) => void;
-  placeholder?: string;
-}) {
+  value, onChange, placeholder,
+}: { value: string; onChange: (html: string) => void; placeholder?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-
   const exec = (cmd: string, val?: string) => {
-    // execCommand memang deprecated, tapi masih paling ringan untuk use case ini
     document.execCommand(cmd, false, val);
     if (ref.current) onChange(ref.current.innerHTML);
   };
-
   useEffect(() => {
     if (ref.current && ref.current.innerHTML !== value) {
       ref.current.innerHTML = value || "";
@@ -98,7 +89,7 @@ function RichEditor({
     </div>
   );
 }
-/* ────────────────────────────────────────────────────────────────────── */
+/* ──────────────────────────────────────────────── */
 
 type Msg = { type: "success" | "error" | "info"; text: string };
 type NovelLite = { id: string; title: string; cover_url: string | null; tags: string[] | null };
@@ -133,18 +124,16 @@ export default function WriteChapterClient() {
         .maybeSingle();
       setNovel((data as any) || null);
 
-      // suggest next chapter number
       const { data: nums } = await supabase
         .from("chapters")
         .select("number")
         .eq("novel_id", novelId)
         .order("number", { ascending: false })
         .limit(1);
+
       if (nums && nums.length && typeof nums[0].number === "number") {
         setNumber((nums[0].number as number) + 1);
-      } else {
-        setNumber(1);
-      }
+      } else setNumber(1);
     })();
   }, [novelId]);
 
@@ -173,25 +162,27 @@ export default function WriteChapterClient() {
 
     setSubmitting(true);
     try {
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      if (!user) throw new Error("Kamu belum login.");
+
       const { error: rpcErr } = await supabase.rpc("ensure_profile");
       if (rpcErr) throw new Error(rpcErr.message || "Gagal memastikan profil.");
 
-      // submit ke antrian bab (pending)
-      const { error } = await supabase.from("submission_chapters").insert([
-        {
-          novel_id: novelId,
-          number: Number(number),
-          title: chapterTitle.trim() || null,
-          content: contentHTML || null,
-          status: "pending",
-        },
-      ]);
+      const payload = {
+        novel_id: novelId,
+        number: Number(number),
+        title: chapterTitle.trim() || null,
+        content: contentHTML || null,
+        content_text: plain.slice(0, 4000) || null,
+        status: "pending",
+        author_id: user.id, // PENTING — untuk RLS & moderasi
+      };
+
+      const { error } = await supabase.from("submission_chapters").insert(payload);
       if (error) throw new Error(error.message);
 
-      setMsg({
-        type: "success",
-        text: "Bab berhasil diajukan. Menunggu persetujuan admin.",
-      });
+      setMsg({ type: "success", text: "Bab berhasil diajukan. Menunggu persetujuan admin." });
       resetForm();
     } catch (e: any) {
       setMsg({ type: "error", text: e?.message || "Gagal mengajukan bab." });
@@ -211,30 +202,20 @@ export default function WriteChapterClient() {
             Bab akan masuk antrian moderasi. {userEmail ? `Masuk sebagai ${userEmail}.` : ""}
           </p>
 
-          {/* info novel pilihan */}
           {novelId ? (
             <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-zinc-900/60 p-3">
               {novel?.cover_url ? (
-                <img
-                  src={novel.cover_url}
-                  alt=""
-                  className="h-12 w-9 rounded border border-white/10 object-cover"
-                />
+                <img src={novel.cover_url} alt="" className="h-12 w-9 rounded border border-white/10 object-cover" />
               ) : (
                 <div className="grid h-12 w-9 place-items-center rounded border border-white/10 bg-white/5 text-[10px] text-zinc-400">
                   No Cover
                 </div>
               )}
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">
-                  {novel?.title || "(Novel tidak ditemukan)"}
-                </div>
+                <div className="truncate text-sm font-semibold">{novel?.title || "(Novel tidak ditemukan)"}</div>
                 <div className="mt-0.5 flex flex-wrap gap-1">
                   {(novel?.tags || []).map((t) => (
-                    <span
-                      key={t}
-                      className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]"
-                    >
+                    <span key={t} className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]">
                       {t}
                     </span>
                   ))}
@@ -277,13 +258,7 @@ export default function WriteChapterClient() {
             ].join(" ")}
           >
             <div className="flex items-center gap-2">
-              {msg.type === "success" ? (
-                <CheckCircle2 className="h-4 w-4" />
-              ) : msg.type === "error" ? (
-                <AlertTriangle className="h-4 w-4" />
-              ) : (
-                <Info className="h-4 w-4" />
-              )}
+              {msg.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : msg.type === "error" ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
               <span>{msg.text}</span>
             </div>
           </div>
@@ -315,24 +290,15 @@ export default function WriteChapterClient() {
 
           <div>
             <label className="mb-1 block text-sm opacity-80">Konten</label>
-            <RichEditor
-              value={contentHTML}
-              onChange={setContentHTML}
-              placeholder="Tulis isi bab di sini…"
-            />
-            <div className="mt-1 text-xs text-zinc-400">
-              Konten disimpan sebagai HTML. Gunakan toolbar untuk format dasar.
-            </div>
+            <RichEditor value={contentHTML} onChange={setContentHTML} placeholder="Tulis isi bab di sini…" />
+            <div className="mt-1 text-xs text-zinc-400">Konten disimpan sebagai HTML. Gunakan toolbar untuk format dasar.</div>
           </div>
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
           <button
             type="button"
-            onClick={() => {
-              setChapterTitle("");
-              setContentHTML("");
-            }}
+            onClick={() => { setChapterTitle(""); setContentHTML(""); }}
             disabled={submitting}
             className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm hover:bg-white/10 disabled:opacity-60"
           >
@@ -344,17 +310,7 @@ export default function WriteChapterClient() {
             disabled={submitting || !novelId}
             className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
           >
-            {submitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Mengajukan…
-              </>
-            ) : (
-              <>
-                <Send className="h-4 w-4" />
-                Ajukan Bab
-              </>
-            )}
+            {submitting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Mengajukan…</>) : (<><Send className="h-4 w-4" /> Ajukan Bab</>)}
           </button>
         </div>
       </main>
