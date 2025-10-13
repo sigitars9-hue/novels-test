@@ -14,6 +14,9 @@ import {
   User2,
   Bookmark,
   Sparkles,
+  LogOut,
+  UserPlus,
+  Check,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -147,28 +150,29 @@ export default function ProfilePage() {
   const [drafts, setDrafts] = useState<any[]>([]);
   const [bookmarks, setBookmarks] = useState<Novel[]>([]);
   const [counts, setCounts] = useState({ novels: 0, drafts: 0, bookmarks: 0 });
+
+  // follow state
+  const [followers, setFollowers] = useState<number | "—">("—");
+  const [isFollowing, setIsFollowing] = useState<boolean>(false);
+  const [followBusy, setFollowBusy] = useState(false);
+
   const [tab, setTab] = useState<"overview" | "bookmarks" | "works" | "drafts" | "settings">(
     "overview"
   );
 
-  // ---- Auth bootstrap (non-blocking) ----
+  /* ---- Auth bootstrap ---- */
   useEffect(() => {
-    let cancelled = false;
-    setAuthReady(true); // jangan blok UI
+    setAuthReady(true);
 
-    // ambil sesi awal
     supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return;
       setAuthUser(data.session?.user ?? null);
     });
 
-    // subscribe perubahan
-    const { data: sub } = supabase.auth.onAuthStateChange((_ev, session) => {
-      if (cancelled) return;
-      setAuthUser(session?.user ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange((_ev, sess) => {
+      setAuthUser(sess?.user ?? null);
     });
 
-    // kalau query ?code/error nyasar, lempar ke /auth/callback
+    // hijaukan callback param ke /auth/callback
     if (typeof window !== "undefined") {
       const u = new URL(window.location.href);
       if ((u.searchParams.get("code") || u.searchParams.get("error_code")) && !u.pathname.startsWith("/auth/callback")) {
@@ -176,17 +180,12 @@ export default function ProfilePage() {
       }
     }
 
-    // safety timer (kalau promise hang)
-    const t = setTimeout(() => setAuthReady(true), 1500);
-
     return () => {
-      cancelled = true;
-      clearTimeout(t);
       sub.subscription.unsubscribe();
     };
   }, []);
 
-  // ---- Load data profil dkk ----
+  /* ---- Load data profil dkk ---- */
   useEffect(() => {
     (async () => {
       if (!authReady) return;
@@ -196,10 +195,8 @@ export default function ProfilePage() {
         setAuthUser(user ?? null);
         if (!user) return;
 
-        // ensure profile
         try { await supabase.rpc("ensure_profile"); } catch {}
 
-        // upsert minimal profile
         let { data: p } = await supabase
           .from("profiles")
           .select("*")
@@ -218,6 +215,7 @@ export default function ProfilePage() {
           p = inserted as any;
         }
         setProfile(p as Profile);
+
         if (!p?.id) return;
 
         const [nv, df] = await Promise.all([
@@ -256,23 +254,96 @@ export default function ProfilePage() {
           drafts: draftsAll.filter((d) => d.status === "pending").length,
           bookmarks: bookmarked.length,
         });
+
+        // Followers & status (aman kalau tabel belum ada)
+        try {
+          const { count } = await supabase
+            .from("follows")
+            .select("*", { count: "exact", head: true })
+            .eq("following_id", p.id);
+          setFollowers(typeof count === "number" ? count : "—");
+
+          const me = user?.id;
+          if (me && me !== p.id) {
+            const { data: mine } = await supabase
+              .from("follows")
+              .select("follower_id")
+              .eq("follower_id", me)
+              .eq("following_id", p.id)
+              .maybeSingle();
+            setIsFollowing(!!mine);
+          } else {
+            setIsFollowing(false);
+          }
+        } catch {
+          setFollowers("—");
+          setIsFollowing(false);
+        }
       } finally {
         setLoading(false);
       }
     })();
   }, [authReady]);
 
+  /* ---- Actions: logout & follow ---- */
+  async function handleLogout() {
+    try {
+      await supabase.auth.signOut();
+      try {
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith("sb-") || k.includes("supabase"))
+          .forEach((k) => localStorage.removeItem(k));
+      } catch {}
+      window.location.href = "/";
+    } catch {}
+  }
+
+  async function toggleFollow() {
+    if (!profile?.id) return;
+    if (!authUser?.id) {
+      await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback` } });
+      return;
+    }
+    if (authUser.id === profile.id) return; // gak boleh follow diri sendiri
+    setFollowBusy(true);
+    try {
+      if (isFollowing) {
+        const { error } = await supabase
+          .from("follows")
+          .delete()
+          .eq("follower_id", authUser.id)
+          .eq("following_id", profile.id);
+        if (error) throw error;
+        setIsFollowing(false);
+        setFollowers((c) => (typeof c === "number" ? Math.max(0, c - 1) : c));
+      } else {
+        const { error } = await supabase.from("follows").insert({
+          follower_id: authUser.id,
+          following_id: profile.id,
+        } as any);
+        if (error) throw error;
+        setIsFollowing(true);
+        setFollowers((c) => (typeof c === "number" ? c + 1 : c));
+      }
+    } catch {
+      // diam, biar gak ganggu
+    } finally {
+      setFollowBusy(false);
+    }
+  }
+
   const displayName =
     profile?.name || authUser?.user_metadata?.full_name || authUser?.email?.split("@")[0] || "Pengguna";
   const displayHandle =
-    profile?.handle ||
-    (displayName || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 16);
+    profile?.handle || (displayName || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 16);
   const avatar =
     profile?.avatar_url ||
     authUser?.user_metadata?.avatar_url ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}`;
 
-  // ---- Auth guard ringan (tanpa spinner abadi) ----
+  const isOwner = !!authUser?.id && !!profile?.id && authUser.id === profile.id;
+
+  // ---- Auth guard ringan ----
   if (authReady && !authUser) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -283,7 +354,12 @@ export default function ProfilePage() {
             <p className="mt-1 text-sm text-zinc-400">Masuk untuk melihat profil, karya, dan bookmark kamu.</p>
             <div className="mt-5">
               <button
-                onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback` } })}
+                onClick={() =>
+                  supabase.auth.signInWithOAuth({
+                    provider: "google",
+                    options: { redirectTo: `${window.location.origin}/auth/callback` },
+                  })
+                }
                 className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500"
               >
                 Masuk dengan Google
@@ -316,6 +392,8 @@ export default function ProfilePage() {
               alt={displayName}
               className="h-24 w-24 shrink-0 rounded-full border border-white/10 object-cover"
             />
+
+            {/* Info kiri */}
             <div className="flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl font-extrabold leading-tight">{displayName}</h1>
@@ -350,16 +428,43 @@ export default function ProfilePage() {
                 <Stat label="Karya" value={counts.novels} />
                 <Stat label="Draft antri" value={counts.drafts} />
                 <Stat label="Bookmark" value={counts.bookmarks} />
-                <Stat label="Followers" value="—" />
+                <Stat label="Followers" value={followers} />
                 <Stat label="Rating rata-rata" value="—" />
               </div>
             </div>
 
+            {/* Kanan: badge + actions */}
             <div className="flex items-start gap-2 md:self-start">
               <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs">
                 <Sparkles className="h-3.5 w-3.5" />
                 Member
               </span>
+
+              {/* FOLLOW / LOGOUT */}
+              {!isOwner ? (
+                <button
+                  onClick={toggleFollow}
+                  disabled={followBusy}
+                  className={clsx(
+                    "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs",
+                    isFollowing
+                      ? "border-emerald-400/40 bg-emerald-500/10 hover:bg-emerald-500/20"
+                      : "border-white/10 bg-white/5 hover:bg-white/10"
+                  )}
+                >
+                  {isFollowing ? <Check className="h-3.5 w-3.5" /> : <UserPlus className="h-3.5 w-3.5" />}
+                  {isFollowing ? "Mengikuti" : "Ikuti"}
+                </button>
+              ) : (
+                <button
+                  onClick={handleLogout}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs hover:bg-white/10"
+                  title="Keluar"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Keluar
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -446,7 +551,7 @@ export default function ProfilePage() {
               {loading ? (
                 <CardGrid>
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="rounded-XL border border-white/10 overflow-hidden">
+                    <div key={i} className="rounded-xl border border-white/10 overflow-hidden">
                       <Skeleton className="aspect-[3/4] w-full" />
                       <div className="p-3">
                         <Skeleton className="h-4 w-2/3" />
