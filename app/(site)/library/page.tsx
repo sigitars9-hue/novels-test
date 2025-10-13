@@ -3,15 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import {
-  BookOpen,
-  ArrowUpRight,
-  ChevronDown,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
+import { BookOpen, ArrowUpRight, ChevronDown, Loader2, RefreshCw } from "lucide-react";
 import clsx from "clsx";
-import BottomBar from "@/components/BottomBar";
 
 /* ---------- Utils ---------- */
 function timeAgo(date?: string | null) {
@@ -30,12 +23,12 @@ function hashToIdx(s: string, mod: number) {
 }
 function gradientFor(title: string) {
   const choices = [
-    "from-violet-600 to-fuchsia-500",
     "from-sky-500 to-indigo-600",
+    "from-blue-600 to-cyan-500",
     "from-emerald-500 to-teal-600",
     "from-amber-500 to-orange-600",
     "from-rose-500 to-pink-600",
-    "from-blue-600 to-cyan-500",
+    "from-violet-600 to-fuchsia-500",
   ];
   return "bg-gradient-to-br " + choices[hashToIdx(title, choices.length)];
 }
@@ -44,9 +37,8 @@ function initial(text?: string | null) {
   return (t[0] || "N").toUpperCase();
 }
 
-/* ---------- Types (longgar biar aman ke schema) ---------- */
+/* ---------- Types ---------- */
 type AnyRow = Record<string, any>;
-
 type SortKey = "recent" | "title" | "author";
 
 /* ---------- Page ---------- */
@@ -63,7 +55,6 @@ export default function LibraryPage() {
     setLoading(true);
     setErr(null);
     try {
-      // Ambil * supaya tidak error kalau kolom opsional (cover_url, updated_at) tidak ada.
       const { data, error } = await supabase
         .from("novels")
         .select("*")
@@ -81,7 +72,6 @@ export default function LibraryPage() {
     load();
   }, []);
 
-  // Filter + sort di client (aman & responsif)
   const list = useMemo(() => {
     let r = rows;
     const query = q.trim().toLowerCase();
@@ -90,9 +80,7 @@ export default function LibraryPage() {
         const title = (n.title || "").toString().toLowerCase();
         const author = (n.author || "").toString().toLowerCase();
         const desc = (n.description || "").toString().toLowerCase();
-        return (
-          title.includes(query) || author.includes(query) || desc.includes(query)
-        );
+        return title.includes(query) || author.includes(query) || desc.includes(query);
       });
     }
     if (sort === "recent") {
@@ -103,15 +91,11 @@ export default function LibraryPage() {
       });
     } else if (sort === "title") {
       r = [...r].sort((a, b) =>
-        (a.title || "").localeCompare(b.title || "", undefined, {
-          sensitivity: "base",
-        })
+        (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" })
       );
     } else if (sort === "author") {
       r = [...r].sort((a, b) =>
-        (a.author || "").localeCompare(b.author || "", undefined, {
-          sensitivity: "base",
-        })
+        (a.author || "").localeCompare(b.author || "", undefined, { sensitivity: "base" })
       );
     }
     return r;
@@ -125,6 +109,9 @@ export default function LibraryPage() {
 
   return (
     <main className="mx-auto w-[min(1150px,95vw)] py-8">
+      {/* spacer agar konten tidak ketutup BottomBar di mobile (BottomBar dipasang via segment layout) */}
+      <div className="h-[64px] md:hidden -mt-[64px]" aria-hidden />
+
       {/* Header */}
       <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <h1 className="text-2xl font-bold tracking-tight">Library</h1>
@@ -135,7 +122,7 @@ export default function LibraryPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Cari judul, penulis, deskripsi…"
-              className="h-10 w-full rounded-xl border border-white/10 bg-zinc-950 px-3 pr-9 text-sm outline-none focus:ring-2 focus:ring-violet-600 sm:w-72"
+              className="h-10 w-full rounded-xl border border-white/10 bg-zinc-950 px-3 pr-9 text-sm outline-none focus:ring-2 focus:ring-sky-600 sm:w-72"
             />
             <BookOpen className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 opacity-60" />
           </div>
@@ -145,7 +132,7 @@ export default function LibraryPage() {
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
-                className="h-10 appearance-none rounded-xl border border-white/10 bg-zinc-950 px-3 pr-8 text-sm outline-none focus:ring-2 focus:ring-violet-600"
+                className="h-10 appearance-none rounded-xl border border-white/10 bg-zinc-950 px-3 pr-8 text-sm outline-none focus:ring-2 focus:ring-sky-600"
               >
                 <option value="recent">Terbaru</option>
                 <option value="title">Judul (A→Z)</option>
@@ -157,8 +144,7 @@ export default function LibraryPage() {
             <button
               onClick={hardRefresh}
               className={clsx(
-                "h-10 rounded-xl border border-white/10 bg-zinc-900/60 px-3 text-sm hover:bg-zinc-900",
-                "inline-flex items-center gap-2"
+                "inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-3 text-sm hover:bg-zinc-900"
               )}
             >
               {refreshing ? (
@@ -184,14 +170,11 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {/* Skeleton loading */}
+      {/* Skeleton */}
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 9 }).map((_, i) => (
-            <div
-              key={i}
-              className="animate-pulse rounded-2xl border border-white/10 bg-zinc-900/40 p-4"
-            >
+            <div key={i} className="animate-pulse rounded-2xl border border-white/10 bg-zinc-900/40 p-4">
               <div className="mb-3 h-40 w-full rounded-xl bg-zinc-800/60" />
               <div className="mb-2 h-4 w-2/3 rounded bg-zinc-800/60" />
               <div className="mb-4 h-3 w-full rounded bg-zinc-800/60" />
@@ -208,7 +191,7 @@ export default function LibraryPage() {
             ))}
           </div>
 
-          {/* Empty state */}
+          {/* Empty */}
           {!err && !loading && list.length === 0 && (
             <div className="mt-10 grid place-items-center">
               <div className="w-[min(560px,90vw)] rounded-2xl border border-white/10 bg-zinc-900/40 p-6 text-center">
@@ -216,9 +199,7 @@ export default function LibraryPage() {
                   <BookOpen className="h-6 w-6 opacity-70" />
                 </div>
                 <div className="text-base font-semibold">Tidak ada hasil</div>
-                <p className="mt-1 text-sm opacity-70">
-                  Coba kata kunci lain atau ubah urutan sort.
-                </p>
+                <p className="mt-1 text-sm opacity-70">Coba kata kunci lain atau ubah urutan sort.</p>
               </div>
             </div>
           )}
@@ -227,23 +208,14 @@ export default function LibraryPage() {
     </main>
   );
 }
-export function WithBottomLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen">
-      <main>{children}</main>
-      <div className="h-[64px] md:hidden" aria-hidden />
-   
-    </div>
-  );
-}
 
-/* ---------- Card Component ---------- */
+/* ---------- Card ---------- */
 function CardNovel({ novel }: { novel: AnyRow }) {
   const title: string = novel.title ?? "Tanpa judul";
   const slug: string = novel.slug ?? "";
   const author: string | null = novel.author ?? null;
   const desc: string | null = novel.description ?? null;
-  const cover: string | null = novel.cover_url ?? null; // opsional kalau memang ada
+  const cover: string | null = novel.cover_url ?? null;
   const updated: string | null = novel.updated_at ?? novel.created_at ?? null;
 
   return (
@@ -251,13 +223,12 @@ function CardNovel({ novel }: { novel: AnyRow }) {
       href={slug ? (`/novel/${slug}` as any) : "#"}
       className={clsx(
         "group relative block overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/40 p-4",
-        "hover:border-violet-500/40 hover:bg-zinc-900 transition-colors"
+        "transition-colors hover:border-sky-500/40 hover:bg-zinc-900"
       )}
     >
       {/* Cover */}
       <div className="relative mb-3 h-40 w-full overflow-hidden rounded-xl">
         {cover ? (
-          // gunakan <img> agar tidak perlu konfigurasi domain Next Images
           <img
             src={cover}
             alt={title}
@@ -275,7 +246,6 @@ function CardNovel({ novel }: { novel: AnyRow }) {
           </div>
         )}
 
-        {/* Corner go icon */}
         <div className="pointer-events-none absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-black/40 opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
           <ArrowUpRight className="h-5 w-5" />
         </div>
@@ -283,16 +253,8 @@ function CardNovel({ novel }: { novel: AnyRow }) {
 
       {/* Body */}
       <div className="mb-1 truncate text-lg font-semibold">{title}</div>
-      {author && (
-        <div className="text-xs uppercase tracking-wide text-zinc-400">
-          {author}
-        </div>
-      )}
-      {desc && (
-        <p className="mt-2 line-clamp-2 text-sm leading-relaxed opacity-80">
-          {desc}
-        </p>
-      )}
+      {author && <div className="text-xs uppercase tracking-wide text-zinc-400">{author}</div>}
+      {desc && <p className="mt-2 line-clamp-2 text-sm leading-relaxed opacity-80">{desc}</p>}
 
       {/* Footer */}
       <div className="mt-3 flex items-center justify-between">
@@ -304,7 +266,6 @@ function CardNovel({ novel }: { novel: AnyRow }) {
           Baca
         </div>
       </div>
-         <BottomBar />
     </Link>
   );
 }
