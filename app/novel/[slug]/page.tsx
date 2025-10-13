@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import type { Novel, Chapter } from "@/lib/db";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import BottomBar from "@/components/BottomBar";
+import { supabase } from "@/lib/supabaseClient";
+import type { Novel, Chapter } from "@/lib/db";
 import CommentsSection from "@/components/CommentsSection";
 import {
   MessageSquare,
@@ -21,6 +22,8 @@ import {
   Trash2,
   Loader2,
   AlertTriangle,
+  ArrowLeft,
+  Home as HomeIcon,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -40,6 +43,8 @@ type MiniProfile = {
 };
 
 export default function NovelDetail({ params }: { params: { slug: string } }) {
+  const router = useRouter();
+
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [session, setSession] = useState<any>(null);
@@ -158,7 +163,7 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
         setOtherWorks([]);
       }
 
-      // jumlah bookmark + status saya (jika tabelnya ada)
+      // jumlah bookmark + status saya
       try {
         const { count } = await supabase
           .from("bookmarks")
@@ -185,7 +190,7 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
         setIsBookmarked(false);
       }
 
-      // cek admin untuk user yang login
+      // cek admin
       if (myId) {
         try {
           const { data: me } = await supabase
@@ -201,10 +206,8 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
         setIsAdmin(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [novel?.id, (novel as any)?.author_id, session?.user?.id, params.slug]);
 
-  // derived
   const firstChapter = chapters[0];
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -242,7 +245,7 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
         setBookmarkCount((c) => (typeof c === "number" ? c + 1 : c));
       }
     } catch {
-      // optional: toast error
+      // ignore
     } finally {
       setBookmarkBusy(false);
     }
@@ -264,7 +267,6 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
     }
   }
 
-  // helper tebak bucket/path dari public URL Supabase
   function parseStoragePublicURL(u?: string | null) {
     if (!u) return null;
     const m = u.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
@@ -281,14 +283,11 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
     setDeleteErr(null);
 
     try {
-      // 1) pakai RPC jika ada
       const { error: rpcErr } = await supabase.rpc("delete_novel", {
         p_novel_id: (novel as any).id,
       });
 
       if (rpcErr) {
-        // 2) fallback manual (jaga2 kalau RPC belum dibuat)
-        //    Sesuaikan daftar tabel bila perlu
         const { data: chIds } = await supabase
           .from("chapters")
           .select("id")
@@ -305,7 +304,6 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
         await supabase.from("novels").delete().eq("id", (novel as any).id);
       }
 
-      // 3) hapus cover jika diminta & dari storage supabase
       if (alsoDeleteCover) {
         const parsed = parseStoragePublicURL((novel as any).cover_url);
         if (parsed) {
@@ -313,7 +311,6 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
         }
       }
 
-      // 4) redirect sederhana: kembali ke /profile
       window.location.href = "/profile";
     } catch (e: any) {
       setDeleteErr(e?.message ?? "Gagal menghapus novel.");
@@ -353,7 +350,44 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
-        {/* HERO: tambah kolom aside di kanan */}
+        {/* ───────────────── Sticky Back/Home yang mengikuti scroll ───────────────── */}
+<div
+  className="sticky top-0 z-40 px-3 sm:px-8"
+  style={{ paddingTop: "calc(8px + env(safe-area-inset-top, 0px))" }}
+>
+  {/* layer transparan + blur tipis agar kontras di atas konten apa pun */}
+  <div className="pointer-events-none relative">
+    <div
+      aria-hidden
+    />
+    <div className="relative flex items-center justify-between pointer-events-auto">
+      <button
+        onClick={() =>
+          (history.length > 1 ? router.back() : (window.location.href = "/"))
+        }
+        className="grid h-10 w-10 place-items-center rounded-full border border-white/5 bg-black/40 text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-black/55 active:scale-[0.98] sm:h-11 sm:w-11"
+        aria-label="Kembali"
+      >
+        <svg viewBox="0 0 24 24" className="h-5 w-5 sm:h-6 sm:w-6" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      <Link
+        href="/"
+        className="grid h-10 w-10 place-items-center rounded-full border border-white/5 bg-black/40 text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-black/55 active:scale-[0.98] sm:h-11 sm:w-11"
+        aria-label="Beranda"
+      >
+        <svg viewBox="0 0 24 24" className="h-5 w-5 sm:h-6 sm:w-6" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M3 10l9-7 9 7" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9 21V10h6v11" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Link>
+    </div>
+  </div>
+</div>
+
+        {/* HERO */}
         <section className="relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/40">
           {/* background blur */}
           <div
@@ -367,12 +401,19 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
               transform: "scale(1.08)",
             }}
           />
+
+          {/* gradient top agar icon kontras di foto terang */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-black/35 to-transparent sm:h-20"
+          />
+
           <div className="grid grid-cols-1 gap-6 p-5 md:grid-cols-[220px,1fr,320px] md:p-6">
             {/* cover */}
             <img
               src={cover}
               alt={(novel as any).title}
-              className="h-[280px] w-full rounded-xl object-cover shadow"
+              className="h-[260px] w-full rounded-xl object-cover shadow sm:h-[280px]"
             />
 
             {/* detail utama */}
@@ -576,7 +617,7 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
 
         {/* DAFTAR BAB */}
         <section className="mt-6 rounded-2xl border border-white/10 bg-zinc-900/40">
-          <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+          <div className="flex flex-col gap-2 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm font-semibold">
               Daftar Bab ({filtered.length}/{chapters.length})
             </div>
@@ -588,7 +629,7 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Cari bab (judul/nomor)…"
-                className="h-9 w-[min(280px,70vw)] rounded-lg border border-white/10 bg-zinc-950 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-sky-600"
+                className="h-9 w-[min(320px,80vw)] rounded-lg border border-white/10 bg-zinc-950 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-sky-600"
               />
             </div>
           </div>
@@ -708,7 +749,7 @@ export default function NovelDetail({ params }: { params: { slug: string } }) {
                     className={clsx(
                       "inline-flex items-center gap-2 rounded-lg bg-red-600/90 px-4 py-2 text-sm font-semibold hover:bg-red-600",
                       (deleting || confirmTitle.trim() !== (novel as any).title) &&
-                        "opacity-60 cursor-not-allowed"
+                        "cursor-not-allowed opacity-60"
                     )}
                   >
                     {deleting ? (
