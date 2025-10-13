@@ -1,0 +1,58 @@
+{
+  "compilerOptions": {
+    /* ---------- Output & Target ---------- */
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    /* ---------- JSX & Module ---------- */
+    "jsx": "preserve",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+
+    /* ---------- Path & Base ---------- */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+
+    /* ---------- TypeScript Strictness ---------- */
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,      // ⟵ mencegah error Hero.tsx vs hero.tsx
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "incremental": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+
+    /* ---------- Next.js Plugin ---------- */
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+
+    /* ---------- Extra Type Safety ---------- */
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowSyntheticDefaultImports": true
+  },
+
+  /* ---------- Folder yang disertakan ---------- */
+  "include": [
+    "app",
+    "components",
+    "lib",
+    "types",
+    "next-env.d.ts",
+    ".next/types/**/*.ts"
+  ],
+
+  /* ---------- Folder yang diabaikan ---------- */
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build"
+  ]
+}
