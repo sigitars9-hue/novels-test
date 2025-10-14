@@ -82,7 +82,7 @@ export default function Hero({
 
             {me && (
               <Link
-                href="/me" // langsung literal string, bukan typed route
+                href="/profile" // langsung literal string, bukan typed route
                 className="group flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-2 py-1.5"
               >
                 <div className="relative h-8 w-8 overflow-hidden rounded-full bg-zinc-800">
