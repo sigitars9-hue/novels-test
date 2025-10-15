@@ -5,13 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import type { Novel, Chapter } from "@/lib/db";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkBreaks from "remark-breaks";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
 import DOMPurify from "dompurify";
-
 import {
   ArrowLeft,
   Home,
@@ -41,20 +35,38 @@ function countWords(s: string) {
   if (!t) return 0;
   return t.split(/\s+/).length;
 }
+/** Normalisasi ringan supaya input lama yang mengandung NBSP/zero-width nggak bikin aneh */
+function normalizePlain(s: string) {
+  return (s || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "");
+}
 
-function normalizeForMarkdown(s: string) {
-  if (!s) return "";
-  return s
-    .replace(/&nbsp;/gi, " ")           // entity NBSP -> spasi
-    .replace(/\u00A0/g, " ")            // NBSP char -> spasi
-    .replace(/[\u200B-\u200D\uFEFF]/g, ""); // zero-width
+/* ======== >>> mdToHtml: SALIN DARI EDITOR LAMA <<< ======== */
+function mdToHtml(src: string) {
+  if (!src) return "";
+  let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  s = s.replace(/^###\s+(.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
+  s = s.replace(/^##\s+(.+)$/gm, '<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
+  s = s.replace(/^#\s+(.+)$/gm, '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  s = s.replace(
+    /!\[(.*?)\]\((.*?)\)/g,
+    '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
+  );
+  s = s.replace(/\n{2,}/g, "</p><p>");
+  return "<p>" + s + "</p>";
 }
-/** Deteksi Markdown ketat */
-function detectMarkdownStrict(s: string) {
-  const mdHeaderOrList = /(^|\n)\s*(#{1,6}\s|[-*]\s|\d+\.\s)/;
-  const mdInline = /(\*\*.+?\*\*|__.+?__|`[^`]+`|~~.+?~~|\[.+?\]\(.+?\)|!\[.*?\]\(.+?\))/;
-  return mdHeaderOrList.test(s) || mdInline.test(s);
+/* ========================================================== */
+
+/** Deteksi Markdown ala editor lamamu */
+function looksLikeEditorMarkdown(s: string) {
+  // deteksi heading (#,##,###), bold **, italic *, image ![alt](url)
+  return /(^|\n)\s*#{1,3}\s+/.test(s) || /\*\*.+?\*\*/.test(s) || /\*.+?\*/.test(s) || /!\[.*?\]\(.*?\)/.test(s);
 }
+
 /** Util kelas tema */
 function themeCls(isLight: boolean, light: string, dark: string) {
   return isLight ? light : dark;
@@ -180,30 +192,29 @@ export default function ReaderPage({ params }: ReaderPageProps) {
     };
   }, [params.slug, params.chapter]);
 
-  /* ===== Mode konten & sanitasi ===== */
-  const rawContent = String(chapter?.content ?? "");
-  const normalizedMD = useMemo(() => normalizeForMarkdown(rawContent), [rawContent]);
+  /* ===== Data turunan ===== */
+  const raw = String(chapter?.content ?? "");
+  const plain = useMemo(() => normalizePlain(raw), [raw]);
 
-  const mode: "html" | "md" | "text" = useMemo(() => {
-    if (!normalizedMD.trim()) return "text";
-    if (looksLikeHTML(rawContent)) return "html"; // jika konten memang HTML
-    return detectMarkdownStrict(normalizedMD) ? "md" : "text";
-  }, [rawContent, normalizedMD]);
+  /** Mode render:
+   * - "html": memang HTML
+   * - "md-old": markdown ala Editor lama (mdToHtml)
+   * - "text": fallback paragraf biasa
+   */
+  const mode: "html" | "md-old" | "text" = useMemo(() => {
+    if (!plain.trim()) return "text";
+    if (looksLikeHTML(raw)) return "html";
+    return looksLikeEditorMarkdown(plain) ? "md-old" : "text";
+  }, [raw, plain]);
 
   const sanitizedHTML = useMemo(
-    () => (mode === "html" ? DOMPurify.sanitize(rawContent) : ""),
-    [mode, rawContent]
+    () => (mode === "html" ? DOMPurify.sanitize(raw) : ""),
+    [mode, raw]
   );
 
-  const textParagraphs = useMemo(() => {
-    const s = normalizeForMarkdown(rawContent).replace(/\r\n/g, "\n").trim();
-    if (!s) return [];
-    return s.split(/\n\s*\n+/).map((p) => p);
-  }, [rawContent]);
-
   const words = useMemo(() => {
-    return looksLikeHTML(rawContent) ? countWords(stripHtml(rawContent)) : countWords(normalizedMD);
-  }, [rawContent, normalizedMD]);
+    return looksLikeHTML(raw) ? countWords(stripHtml(raw)) : countWords(plain);
+  }, [raw, plain]);
   const estMin = Math.max(1, Math.round(words / WPM));
 
   /* ===== Auto-hide on scroll ===== */
@@ -383,26 +394,25 @@ export default function ReaderPage({ params }: ReaderPageProps) {
                 />
               )}
 
-              {mode === "md" && (
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkBreaks]}
-                  rehypePlugins={[rehypeRaw, rehypeSanitize]}
-                  components={{
-                    p: (props) => <p className="whitespace-pre-wrap leading-8" {...props} />,
-                    li: (props) => <li className="whitespace-pre-wrap" {...props} />,
-                  }}
-                >
-                  {normalizedMD}
-                </ReactMarkdown>
+              {mode === "md-old" && (
+                <div
+                  className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
+                  // mdToHtml sudah escape tag, jadi aman; tetap lewati DOMPurify agar konsisten
+                  dangerouslySetInnerHTML={{ __html: mdToHtml(plain) }}
+                />
               )}
 
               {mode === "text" && (
                 <div className="max-w-none">
-                  {textParagraphs.map((p, i) => (
-                    <p key={i} className="mb-4 whitespace-pre-wrap leading-8">
-                      {p}
-                    </p>
-                  ))}
+                  {plain
+                    .replace(/\r\n/g, "\n")
+                    .trim()
+                    .split(/\n\s*\n+/)
+                    .map((p, i) => (
+                      <p key={i} className="mb-4 whitespace-pre-wrap leading-8">
+                        {p}
+                      </p>
+                    ))}
                 </div>
               )}
             </article>
