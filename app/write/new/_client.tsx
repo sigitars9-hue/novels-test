@@ -21,23 +21,59 @@ import {
   BookOpen,
 } from "lucide-react";
 
-function EditorToolbar({ exec, dense = false }: {
+/* ─────────────── Toolbar ─────────────── */
+function EditorToolbar({
+  exec,
+  dense = false,
+}: {
   exec: (cmd: string, val?: string) => void;
   dense?: boolean;
 }) {
   const pad = dense ? "px-2 py-1" : "px-2.5 py-1.5";
   return (
-    <div className={`
-      flex items-center gap-1 rounded-xl border border-white/10
-      bg-zinc-900/85 backdrop-blur shadow-sm
-    `}>
-      <button type="button" onClick={() => exec("bold")}      className={`rounded-lg ${pad} hover:bg-white/10`} title="Bold"><Bold className="h-4 w-4" /></button>
-      <button type="button" onClick={() => exec("italic")}    className={`rounded-lg ${pad} hover:bg-white/10`} title="Italic"><Italic className="h-4 w-4" /></button>
-      <button type="button" onClick={() => exec("underline")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Underline"><Underline className="h-4 w-4" /></button>
+    <div
+      className="
+        flex items-center gap-1 rounded-xl border border-white/10
+        bg-zinc-900/85 backdrop-blur shadow-sm
+      "
+    >
+      <button type="button" onClick={() => exec("bold")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Bold">
+        <Bold className="h-4 w-4" />
+      </button>
+      <button type="button" onClick={() => exec("italic")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Italic">
+        <Italic className="h-4 w-4" />
+      </button>
+      <button type="button" onClick={() => exec("underline")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Underline">
+        <Underline className="h-4 w-4" />
+      </button>
+
       <span className="mx-1 h-5 w-px bg-white/10" />
-      <button type="button" onClick={() => exec("formatBlock", "<h2>")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Heading"><Type className="h-4 w-4" /></button>
-      <button type="button" onClick={() => exec("insertUnorderedList")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Bullet List"><List className="h-4 w-4" /></button>
-      <button type="button" onClick={() => exec("insertOrderedList")}  className={`rounded-lg ${pad} hover:bg-white/10`} title="Numbered List"><ListOrdered className="h-4 w-4" /></button>
+
+      <button
+        type="button"
+        onClick={() => exec("formatBlock", "<h2>")}
+        className={`rounded-lg ${pad} hover:bg-white/10`}
+        title="Heading"
+      >
+        <Type className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => exec("insertUnorderedList")}
+        className={`rounded-lg ${pad} hover:bg-white/10`}
+        title="Bullet List"
+      >
+        <List className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => exec("insertOrderedList")}
+        className={`rounded-lg ${pad} hover:bg-white/10`}
+        title="Numbered List"
+      >
+        <ListOrdered className="h-4 w-4" />
+      </button>
+
       <button
         type="button"
         onClick={() => {
@@ -53,6 +89,7 @@ function EditorToolbar({ exec, dense = false }: {
   );
 }
 
+/* ─────────────── Editor ─────────────── */
 function RichEditor({
   value,
   onChange,
@@ -63,17 +100,55 @@ function RichEditor({
   placeholder?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [focused, setFocused] = useState(false);
 
   const exec = (cmd: string, val?: string) => {
     document.execCommand(cmd, false, val);
     if (ref.current) onChange(ref.current.innerHTML);
   };
 
+  // sinkronisasi value dari luar
   useEffect(() => {
     if (ref.current && ref.current.innerHTML !== value) {
       ref.current.innerHTML = value || "";
     }
   }, [value]);
+
+  // paste handler — bersihkan style/handler, jaga baris baru
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const onPaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      const html = e.clipboardData.getData("text/html");
+      const text = e.clipboardData.getData("text/plain");
+
+      // Kalau ada HTML, sanitize ringan; kalau tidak, pakai plain text dengan <br>
+      if (html) {
+        e.preventDefault();
+        // buang style & on* attribute
+        let clean = html
+          .replace(/\sstyle=["'][^"']*["']/gi, "")
+          .replace(/\s(on\w+)=["'][^"']*["']/gi, "");
+        // biarkan <p>, <br>, <ul>, <ol>, <li>, <b><i><u><a>
+        // (yang lain biarkan juga—akan di-normalize saat read)
+        document.execCommand("insertHTML", false, clean);
+      } else if (text) {
+        e.preventDefault();
+        const safe = text
+          .split(/\r?\n/)
+          .map((ln) => ln.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+          .join("<br>");
+        document.execCommand("insertHTML", false, safe);
+      }
+      // update value
+      if (ref.current) onChange(ref.current.innerHTML);
+    };
+
+    el.addEventListener("paste", onPaste as any);
+    return () => el.removeEventListener("paste", onPaste as any);
+  }, [onChange]);
 
   return (
     <div className="space-y-2">
@@ -82,6 +157,8 @@ function RichEditor({
         ref={ref}
         contentEditable
         onInput={() => ref.current && onChange(ref.current.innerHTML)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         data-placeholder={placeholder || "Tulis di sini..."}
         className="
           min-h-[260px] w-full rounded-xl border border-white/10 bg-zinc-900
@@ -89,10 +166,16 @@ function RichEditor({
           prose prose-invert max-w-none
           empty:before:text-zinc-500/70 empty:before:content-[attr(data-placeholder)]
         "
-        style={{ wordBreak: "break-word" }}
+        style={{
+          wordBreak: "break-word",
+          // ekstra ruang bawah saat fokus (menghindari toolbar/popup menutup area tulis)
+          paddingBottom: focused ? "5.5rem" : undefined,
+          // beri sedikit scroll-margin supaya caret tak mepet tepi
+          scrollMarginBottom: "6rem",
+        }}
       />
 
-      {/* Toolbar dipindah ke bawah kolom */}
+      {/* Toolbar di bawah kolom */}
       <div className="pt-1">
         <EditorToolbar exec={exec} />
       </div>
@@ -103,7 +186,12 @@ function RichEditor({
 /* ──────────────────────────────────────────────── */
 
 type Msg = { type: "success" | "error" | "info"; text: string };
-type NovelLite = { id: string; title: string; cover_url: string | null; tags: string[] | null };
+type NovelLite = {
+  id: string;
+  title: string;
+  cover_url: string | null;
+  tags: string[] | null;
+};
 
 export default function WriteChapterClient() {
   const params = useSearchParams();
@@ -173,7 +261,10 @@ export default function WriteChapterClient() {
 
     setSubmitting(true);
     try {
-      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
       if (userErr) throw userErr;
       if (!user) throw new Error("Kamu belum login.");
 
@@ -184,16 +275,19 @@ export default function WriteChapterClient() {
         novel_id: novelId,
         number: Number(number),
         title: chapterTitle.trim() || null,
-        content: contentHTML || null,
+        content: contentHTML || null, // HTML disimpan apa adanya (akan dinormalisasi di Read)
         content_text: plain.slice(0, 4000) || null,
         status: "pending",
-        author_id: user.id, // PENTING — untuk RLS & moderasi
+        author_id: user.id, // untuk RLS & moderasi
       };
 
       const { error } = await supabase.from("submission_chapters").insert(payload);
       if (error) throw new Error(error.message);
 
-      setMsg({ type: "success", text: "Bab berhasil diajukan. Menunggu persetujuan admin." });
+      setMsg({
+        type: "success",
+        text: "Bab berhasil diajukan. Menunggu persetujuan admin.",
+      });
       resetForm();
     } catch (e: any) {
       setMsg({ type: "error", text: e?.message || "Gagal mengajukan bab." });
@@ -208,25 +302,37 @@ export default function WriteChapterClient() {
       <section className="relative">
         <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(900px_400px_at_20%_-10%,rgba(125,211,252,.12),transparent),radial-gradient(700px_320px_at_80%_0%,rgba(147,197,253,.12),transparent)]" />
         <div className="mx-auto w-[min(980px,95vw)] px-4 py-8">
-          <h1 className="text-3xl font-extrabold tracking-tight">Tulis Bab (Pending Approval)</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight">
+            Tulis Bab (Pending Approval)
+          </h1>
           <p className="mt-1 text-sm text-zinc-300/90">
-            Bab akan masuk antrian moderasi. {userEmail ? `Masuk sebagai ${userEmail}.` : ""}
+            Bab akan masuk antrian moderasi.{" "}
+            {userEmail ? `Masuk sebagai ${userEmail}.` : ""}
           </p>
 
           {novelId ? (
             <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-zinc-900/60 p-3">
               {novel?.cover_url ? (
-                <img src={novel.cover_url} alt="" className="h-12 w-9 rounded border border-white/10 object-cover" />
+                <img
+                  src={novel.cover_url}
+                  alt=""
+                  className="h-12 w-9 rounded border border-white/10 object-cover"
+                />
               ) : (
                 <div className="grid h-12 w-9 place-items-center rounded border border-white/10 bg-white/5 text-[10px] text-zinc-400">
                   No Cover
                 </div>
               )}
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">{novel?.title || "(Novel tidak ditemukan)"}</div>
+                <div className="truncate text-sm font-semibold">
+                  {novel?.title || "(Novel tidak ditemukan)"}
+                </div>
                 <div className="mt-0.5 flex flex-wrap gap-1">
                   {(novel?.tags || []).map((t) => (
-                    <span key={t} className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]">
+                    <span
+                      key={t}
+                      className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]"
+                    >
                       {t}
                     </span>
                   ))}
@@ -239,8 +345,8 @@ export default function WriteChapterClient() {
             </div>
           ) : (
             <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
-              novel_id tidak ada. Buka dari halaman metadata novel agar parameter ikut terisi.{" "}
-              <Link href="/write" className="underline">Kembali ke metadata</Link>
+              novel_id tidak ada. Buka dari halaman metadata novel agar parameter
+              ikut terisi. <Link href="/write" className="underline">Kembali ke metadata</Link>
             </div>
           )}
         </div>
@@ -252,7 +358,8 @@ export default function WriteChapterClient() {
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-sky-300" />
             <span>
-              Status awal <span className="font-semibold text-sky-300">pending</span>. Konten akan ditinjau moderator sebelum tayang.
+              Status awal <span className="font-semibold text-sky-300">pending</span>.
+              Konten akan ditinjau moderator sebelum tayang.
             </span>
           </div>
         </div>
@@ -269,7 +376,13 @@ export default function WriteChapterClient() {
             ].join(" ")}
           >
             <div className="flex items-center gap-2">
-              {msg.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : msg.type === "error" ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
+              {msg.type === "success" ? (
+                <CheckCircle2 className="h-4 w-4" />
+              ) : msg.type === "error" ? (
+                <AlertTriangle className="h-4 w-4" />
+              ) : (
+                <Info className="h-4 w-4" />
+              )}
               <span>{msg.text}</span>
             </div>
           </div>
@@ -283,13 +396,17 @@ export default function WriteChapterClient() {
                 type="number"
                 min={1}
                 value={number}
-                onChange={(e) => setNumber(e.target.value === "" ? "" : Number(e.target.value))}
+                onChange={(e) =>
+                  setNumber(e.target.value === "" ? "" : Number(e.target.value))
+                }
                 placeholder="1"
                 className="w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 text-sm outline-none ring-1 ring-transparent transition focus:ring-sky-500"
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm opacity-80">Judul Bab (opsional)</label>
+              <label className="mb-1 block text-sm opacity-80">
+                Judul Bab (opsional)
+              </label>
               <input
                 value={chapterTitle}
                 onChange={(e) => setChapterTitle(e.target.value)}
@@ -301,15 +418,24 @@ export default function WriteChapterClient() {
 
           <div>
             <label className="mb-1 block text-sm opacity-80">Konten</label>
-            <RichEditor value={contentHTML} onChange={setContentHTML} placeholder="Tulis isi bab di sini…" />
-            <div className="mt-1 text-xs text-zinc-400">Konten disimpan sebagai HTML. Gunakan toolbar untuk format dasar.</div>
+            <RichEditor
+              value={contentHTML}
+              onChange={setContentHTML}
+              placeholder="Tulis isi bab di sini…"
+            />
+            <div className="mt-1 text-xs text-zinc-400">
+              Konten disimpan sebagai HTML. Gunakan toolbar untuk format dasar.
+            </div>
           </div>
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
           <button
             type="button"
-            onClick={() => { setChapterTitle(""); setContentHTML(""); }}
+            onClick={() => {
+              setChapterTitle("");
+              setContentHTML("");
+            }}
             disabled={submitting}
             className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm hover:bg-white/10 disabled:opacity-60"
           >
@@ -321,7 +447,15 @@ export default function WriteChapterClient() {
             disabled={submitting || !novelId}
             className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
           >
-            {submitting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Mengajukan…</>) : (<><Send className="h-4 w-4" /> Ajukan Bab</>)}
+            {submitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Mengajukan…
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" /> Ajukan Bab
+              </>
+            )}
           </button>
         </div>
       </main>
