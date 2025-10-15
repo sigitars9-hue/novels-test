@@ -54,13 +54,21 @@ function EditorToolbar({ exec, dense = false }: {
 }
 
 function RichEditor({
-  value, onChange, placeholder,
-}: { value: string; onChange: (html: string) => void; placeholder?: string }) {
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (html: string) => void;
+  placeholder?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+
   const exec = (cmd: string, val?: string) => {
     document.execCommand(cmd, false, val);
     if (ref.current) onChange(ref.current.innerHTML);
   };
+
   useEffect(() => {
     if (ref.current && ref.current.innerHTML !== value) {
       ref.current.innerHTML = value || "";
@@ -69,20 +77,29 @@ function RichEditor({
 
   return (
     <div className="space-y-2">
-      <EditorToolbar exec={exec} />
+      {/* Kolom isi bab */}
       <div
         ref={ref}
         contentEditable
         onInput={() => ref.current && onChange(ref.current.innerHTML)}
         data-placeholder={placeholder || "Tulis di sini..."}
-        className="min-h-[260px] w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 outline-none ring-1 ring-transparent transition focus:ring-sky-500
-                   prose prose-invert max-w-none
-                   empty:before:text-zinc-500/70 empty:before:content-[attr(data-placeholder)]"
+        className="
+          min-h-[260px] w-full rounded-xl border border-white/10 bg-zinc-900
+          px-3 py-3 outline-none ring-1 ring-transparent transition focus:ring-sky-500
+          prose prose-invert max-w-none
+          empty:before:text-zinc-500/70 empty:before:content-[attr(data-placeholder)]
+        "
         style={{ wordBreak: "break-word" }}
       />
+
+      {/* Toolbar dipindah ke bawah kolom */}
+      <div className="pt-1">
+        <EditorToolbar exec={exec} />
+      </div>
     </div>
   );
 }
+
 /* ──────────────────────────────────────────────── */
 
 type Msg = { type: "success" | "error" | "info"; text: string };
