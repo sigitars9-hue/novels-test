@@ -123,7 +123,7 @@ export default function Announcements({
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-2xl font-extrabold tracking-tight">Pengumuman</h3>
         <a
-          href="/announcements"
+          href="/announcement"
           className="rounded-md px-1 text-sm text-zinc-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         >
           Semua

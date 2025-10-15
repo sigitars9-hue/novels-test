@@ -21,66 +21,79 @@ import {
   List,
   ChevronUp,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Bookmark,
-  MessageSquare,
-  Type,
 } from "lucide-react";
 
 import CommentsSection from "@/components/CommentsSection";
 
-/* ───────── Utils ───────── */
-const WPM = 220; // words per minute
+/* ===== Helpers ===== */
+const WPM = 220;
+const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 function looksLikeHTML(s: string) {
   return /<\/?[a-z][\s\S]*>/i.test(s);
 }
 function stripHtml(html: string) {
-  if (!html) return "";
-  const tmp = document.createElement("div");
+  const tmp = typeof window !== "undefined" ? document.createElement("div") : null;
+  if (!tmp) return html;
   tmp.innerHTML = html;
   return tmp.textContent || tmp.innerText || "";
 }
 function countWords(s: string) {
-  const t = s.trim();
+  const t = (s || "").trim();
   if (!t) return 0;
   return t.split(/\s+/).length;
 }
+/** Deteksi Markdown ketat: hanya jika benar-benar ada sintaks MD */
+function detectMarkdownStrict(s: string) {
+  const mdHeaderOrList = /(^|\n)\s*(#{1,6}\s|[-*]\s|\d+\.\s)/;
+  const mdInline = /(\*\*.+\*\*|__.+__|`[^`]+`|~~.+~~|\[.+\]\(.+\)|!\[.*\]\(.+\))/;
+  return mdHeaderOrList.test(s) || mdInline.test(s);
+}
 
-type ReaderPageProps = {
-  params: { slug: string; chapter: string };
-};
+type ReaderPageProps = { params: { slug: string; chapter: string } };
 
 export default function ReaderPage({ params }: ReaderPageProps) {
+  /* ===== State ===== */
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapter, setChapter] = useState<Chapter | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // prev/next
+  // nav
   const [prevChapter, setPrevChapter] = useState<Chapter | null>(null);
   const [nextChapter, setNextChapter] = useState<Chapter | null>(null);
 
-  // reader
+  // UI visibility
+  const [uiVisible, setUiVisible] = useState(true); // tap to toggle
+  const lastY = useRef(0);
+
+  // Auto-scroll
   const [autoScroll, setAutoScroll] = useState(false);
   const [speed, setSpeed] = useState(60); // px/s
-  const [showSettings, setShowSettings] = useState(false);
-
-  // UI/Immersive
-  const [immersive, setImmersive] = useState(true);
-  const [showUI, setShowUI] = useState(true);
-
-  // upgrades
-  const [progress, setProgress] = useState(0);          // %
-  const [fontScale, setFontScale] = useState(1);        // 1 = default
-  const [bookmarked, setBookmarked] = useState(false);  // local flag
-  const [estMin, setEstMin] = useState<number>(0);      // est reading minutes
-
-  const contentRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
-  const lastTsRef = useRef<number>(0);
+  const lastTsRef = useRef(0);
 
-  /* ───────── Fetch data ───────── */
+  // Settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [mirror, setMirror] = useState<string>("");
+  const [fontScale, setFontScale] = useState(1);
+
+  // HUD docking (berhenti sebelum komentar)
+  const [docked, setDocked] = useState(false);
+  const dockSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0];
+        setDocked(e.isIntersecting);
+      },
+      { root: null, threshold: 0, rootMargin: "0px 0px -80px 0px" }
+    );
+    if (dockSentinelRef.current) obs.observe(dockSentinelRef.current);
+    return () => obs.disconnect();
+  }, []);
+
+  /* ===== Fetch ===== */
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -97,8 +110,8 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         if (!mounted) return;
         setNovel(n || null);
 
+        const num = parseInt(params.chapter, 10);
         if (n) {
-          const num = parseInt(params.chapter, 10);
           const { data: ch, error: e2 } = await supabase
             .from("chapters")
             .select("*")
@@ -106,9 +119,9 @@ export default function ReaderPage({ params }: ReaderPageProps) {
             .eq("number", num)
             .maybeSingle();
           if (e2) throw e2;
-          if (!mounted) return;
           setChapter((ch as Chapter) || null);
 
+          // prev/next
           if (ch?.id) {
             const [prevQ, nextQ] = await Promise.all([
               supabase
@@ -134,14 +147,13 @@ export default function ReaderPage({ params }: ReaderPageProps) {
           }
         } else {
           setChapter(null);
-          setPrevChapter(null);
-          setNextChapter(null);
         }
       } catch (e: any) {
         if (!mounted) return;
-        setErr(e?.message ?? "Terjadi kesalahan saat memuat data.");
+        setErr(e?.message ?? "Gagal memuat data.");
       } finally {
-        if (mounted) setLoading(false);
+        if (!mounted) return;
+        setLoading(false);
       }
     })();
 
@@ -150,58 +162,58 @@ export default function ReaderPage({ params }: ReaderPageProps) {
     };
   }, [params.slug, params.chapter]);
 
-  /* ───────── Content mode (HTML / MD / empty) ───────── */
-  const contentMode: "html" | "md" | "empty" = useMemo(() => {
-    const raw = chapter?.content?.toString() ?? "";
-    if (!raw.trim()) return "empty";
-    return looksLikeHTML(raw) ? "html" : "md";
+  /* ===== Mode konten & sanitasi ===== */
+  const mode: "html" | "md" | "text" = useMemo(() => {
+    const raw = String(chapter?.content ?? "");
+    if (!raw.trim()) return "text";
+    if (looksLikeHTML(raw)) return "html";
+    return detectMarkdownStrict(raw) ? "md" : "text";
   }, [chapter?.content]);
 
   const sanitizedHTML = useMemo(() => {
-    if (contentMode !== "html") return "";
-    const raw = chapter?.content?.toString() ?? "";
-    return DOMPurify.sanitize(raw);
-  }, [contentMode, chapter?.content]);
+    if (mode !== "html") return "";
+    return DOMPurify.sanitize(String(chapter?.content ?? ""));
+  }, [mode, chapter?.content]);
 
-  // estimate reading time (recalc when chapter changes)
-  useEffect(() => {
-    const raw = chapter?.content?.toString() ?? "";
-    let words = 0;
-    if (looksLikeHTML(raw)) words = countWords(stripHtml(raw));
-    else words = countWords(raw);
-    setEstMin(Math.max(1, Math.round(words / WPM)));
+  // versi paragraf untuk TEKS biasa (tanpa sintaks MD)
+  const textParagraphs = useMemo(() => {
+    const raw = String(chapter?.content ?? "").replace(/\r\n/g, "\n").trim();
+    if (!raw) return [];
+    // Pisah paragraf di baris kosong; single enter tetap jadi baris baru (di class)
+    return raw.split(/\n\s*\n+/).map((p) => p);
   }, [chapter?.content]);
 
-  /* ───────── Fullscreen helpers ───────── */
-  const enterFullscreen = async () => {
-    try {
-      const el = document.documentElement as any;
-      if (!document.fullscreenElement && el.requestFullscreen) {
-        await el.requestFullscreen();
-      }
-    } catch {}
-  };
-  const exitFullscreen = async () => {
-    try {
-      if (document.fullscreenElement && document.exitFullscreen) {
-        await document.exitFullscreen();
-      }
-    } catch {}
-  };
-  useEffect(() => { immersive ? enterFullscreen() : exitFullscreen(); }, [immersive]);
+  const words = useMemo(() => {
+    const raw = String(chapter?.content ?? "");
+    return looksLikeHTML(raw) ? countWords(stripHtml(raw)) : countWords(raw);
+  }, [chapter?.content]);
+  const estMin = Math.max(1, Math.round(words / WPM));
 
-  /* ───────── Auto-scroll loop ───────── */
+  /* ===== Auto-hide on scroll ===== */
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY;
+      const goingDown = y > lastY.current + 2;
+      lastY.current = y;
+      if (goingDown && uiVisible) setUiVisible(false);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [uiVisible]);
+
+  /* ===== Auto-scroll loop ===== */
   useEffect(() => {
     if (!autoScroll) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
+      lastTsRef.current = 0;
       return;
     }
     const step = (ts: number) => {
       if (!lastTsRef.current) lastTsRef.current = ts;
-      const delta = (ts - lastTsRef.current) / 1000;
+      const dt = (ts - lastTsRef.current) / 1000;
       lastTsRef.current = ts;
-      window.scrollBy(0, speed * delta);
+      window.scrollBy(0, speed * dt);
 
       const atBottom =
         window.innerHeight + window.scrollY >=
@@ -221,113 +233,27 @@ export default function ReaderPage({ params }: ReaderPageProps) {
     };
   }, [autoScroll, speed]);
 
-  /* ───────── Shortcuts ───────── */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isEditing =
-        !!target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.getAttribute("contenteditable") === "true");
-      if (isEditing) return;
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        if (!showUI) return;
-        setAutoScroll((v) => !v);
-      } else if (e.key === "ArrowUp") {
-        window.scrollBy({ top: -window.innerHeight * 0.9, behavior: "smooth" });
-      } else if (e.key === "ArrowDown") {
-        window.scrollBy({ top: window.innerHeight * 0.9, behavior: "smooth" });
-      } else if (e.key === "Escape") {
-        setImmersive(false);
-        setShowUI(true);
-        exitFullscreen();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [showUI]);
-
-  /* ───────── Progress + font scale + bookmark ───────── */
-  // track progress
-  useEffect(() => {
-    const onScroll = () => {
-      const h = document.documentElement;
-      const pct =
-        ((window.scrollY) / ((h.scrollHeight - h.clientHeight) || 1)) * 100;
-      setProgress(Math.min(100, Math.max(0, pct)));
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  // seek helper
-  const seekTo = (pct: number) => {
-    const h = document.documentElement;
-    const target =
-      ((h.scrollHeight - h.clientHeight) * Math.min(100, Math.max(0, pct))) / 100;
-    window.scrollTo({ top: target, behavior: "smooth" });
-  };
-
-  // apply CSS var to article
-  useEffect(() => {
-    if (!contentRef.current) return;
-    contentRef.current.style.setProperty("--reader-font-scale", String(fontScale));
-  }, [fontScale]);
-
-  // save & restore position (local)
-  useEffect(() => {
-    const key = `readpos:${params.slug}:${params.chapter}`;
-    const id = setInterval(
-      () => localStorage.setItem(key, String(progress.toFixed(1))),
-      1500
-    );
-    return () => clearInterval(id);
-  }, [progress, params.slug, params.chapter]);
-
-  useEffect(() => {
-    const key = `readpos:${params.slug}:${params.chapter}`;
-    const saved = Number(localStorage.getItem(key) || "0");
-    if (saved > 0) setTimeout(() => seekTo(saved), 300);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.slug, params.chapter]);
-
-  /* ───────── UI ───────── */
-  const toggleUI = () => setShowUI((v) => !v);
-
-  const title =
-    novel && chapter ? `${novel.title} > Bab ${chapter.number}` : "Membaca…";
-
+  /* ===== UI derived ===== */
   const prevHref =
     prevChapter && novel ? `/read/${params.slug}/${(prevChapter as any).number}` : "#";
   const nextHref =
     nextChapter && novel ? `/read/${params.slug}/${(nextChapter as any).number}` : "#";
 
+  /* ===== Render ===== */
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* TopBar hidden saat immersive */}
-      {!immersive && (
-        <div className="sticky top-0 z-50">
-          <div className="border-b border-white/10 bg-zinc-950/90 px-4 py-3">
-            <div className="mx-auto w-[min(980px,95vw)]">
-              <Link href="/" className="text-sm opacity-80 hover:opacity-100">
-                Home
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BREADCRUMB FLOAT BAR */}
+    <div
+      className="min-h-screen bg-zinc-950 text-zinc-100"
+      onClick={() => {
+        if (!uiVisible) setUiVisible(true); // single tap untuk munculkan HUD
+      }}
+    >
+      {/* === TOP HUD (desain tetap, warna biru gelap) === */}
       <div
-        className={`pointer-events-none fixed left-1/2 top-3 z-40 w-[min(980px,95vw)] -translate-x-1/2 transition-opacity ${
-          showUI ? "opacity-100" : "opacity-0"
+        className={`sticky top-3 z-50 mx-auto w-[min(980px,94vw)] transition-opacity ${
+          uiVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
-        <div className="pointer-events-auto flex items-center justify-between gap-3 rounded-2xl bg-zinc-900/80 px-4 py-3 shadow-lg ring-1 ring-white/10 backdrop-blur">
+        <div className="flex items-center justify-between rounded-2xl bg-zinc-900/90 px-4 py-3 ring-1 ring-white/10 backdrop-blur">
           <Link
             href={`/novel/${params.slug}`}
             className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
@@ -336,19 +262,16 @@ export default function ReaderPage({ params }: ReaderPageProps) {
             <ArrowLeft className="h-5 w-5" />
           </Link>
 
-          <div className="flex-1 text-center">
-            <div className="text-sm font-semibold text-zinc-200">
-              {novel?.title ?? "…"}
-              <span className="mx-2 opacity-50">{">"}</span>
-              <span className="text-sky-400">
-                {chapter ? `Bab ${chapter.number}` : "…"}
+          <div className="min-w-0 px-3 text-center">
+            <div className="truncate font-semibold text-indigo-300">
+              {novel?.title ?? "—"}
+            </div>
+            <div className="truncate text-sm">
+              <span className="opacity-50">›</span>{" "}
+              <span className="text-indigo-400">
+                {chapter ? `Ch ${chapter.number}` : "—"}
               </span>
             </div>
-            {!!estMin && (
-              <div className="mt-0.5 text-xs text-sky-300/80">
-                ~{estMin} menit baca
-              </div>
-            )}
           </div>
 
           <Link
@@ -361,16 +284,35 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         </div>
       </div>
 
-      {/* CONTENT (klik untuk toggle UI) */}
+      {/* === CONTENT === */}
       <main
-        ref={contentRef}
-        className="mx-auto w-[min(980px,95vw)] pt-20 pb-28"
-        aria-label={title}
-        onClick={toggleUI}
+        className="mx-auto w-[min(980px,94vw)] pb-24 pt-2"
+        onClick={(e) => {
+          if (uiVisible) {
+            const t = e.target as HTMLElement;
+            if (t.closest("a,button,input,textarea,select")) return;
+            setUiVisible(false);
+          }
+        }}
+        style={{
+          fontSize: `clamp(1rem, ${fontScale}rem, 1.25rem)`,
+          lineHeight: 1.9,
+        }}
       >
+        {!loading && !err && novel && chapter && (
+          <section className="mb-4 rounded-2xl bg-zinc-900/60 p-4 ring-1 ring-white/10">
+            <h1 className="text-xl font-extrabold leading-tight text-indigo-300">
+              {chapter.title ? chapter.title : `Bab ${chapter.number}`}
+            </h1>
+            <div className="mt-1 text-xs text-zinc-300/90">
+              {novel.title} · {words} kata · ~{estMin} menit baca
+            </div>
+          </section>
+        )}
+
         {loading && (
           <div className="mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm">
-            Loading…
+            Memuat…
           </div>
         )}
 
@@ -388,315 +330,195 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
         {!loading && !err && novel && chapter && (
           <>
-            {/* Top Prev/Next */}
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <Link
-                href={prevHref}
-                onClick={(e) => { if (!prevChapter) e.preventDefault(); }}
-                className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${
-                  prevChapter ? "bg-zinc-800 hover:bg-zinc-700" : "bg-zinc-800/40 cursor-not-allowed"
-                }`}
-              >
-                <ChevronLeft className="h-4 w-4" />
-                Sebelumnya
-              </Link>
+            {/* Isi bab: perbaikan Markdown & teks biasa */}
+            <article className="prose prose-invert max-w-none">
+              {mode === "html" && (
+                <div
+                  className="prose prose-invert max-w-none"
+                  dangerouslySetInnerHTML={{ __html: sanitizedHTML }}
+                />
+              )}
 
-              <div className="text-xs opacity-70">
-                Bab {chapter.number} · {chapter.title || "Tanpa Judul"}
-              </div>
+              {mode === "md" && (
+                <ReactMarkdown
+                  remarkPlugins={[
+                    remarkGfm,
+                    remarkBreaks, // enter = line break
+                  ]}
+                  rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                  components={{
+                    // pastikan spasi/enter tidak “nempel”
+                    p: (props) => (
+                      <p className="whitespace-pre-wrap leading-8" {...props} />
+                    ),
+                    li: (props) => (
+                      <li className="whitespace-pre-wrap" {...props} />
+                    ),
+                  }}
+                >
+                  {String(chapter.content ?? "")}
+                </ReactMarkdown>
+              )}
 
-              <Link
-                href={nextHref}
-                onClick={(e) => { if (!nextChapter) e.preventDefault(); }}
-                className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${
-                  nextChapter ? "bg-zinc-800 hover:bg-zinc-700" : "bg-zinc-800/40 cursor-not-allowed"
-                }`}
-              >
-                Berikutnya
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            </div>
-
-            <article className="prose prose-invert max-w-none [font-size:clamp(1rem,calc(1rem*var(--reader-font-scale,1)),1.5rem)]">
-              <h1 className="mb-4">
-                {novel.title} — Bab {chapter.number}: {chapter.title}
-              </h1>
-
-              {/* HTML / MD rendering */}
-              {(() => {
-                if (contentMode === "html")
-                  return (
-                    <div
-                      className="prose prose-invert max-w-none"
-                      dangerouslySetInnerHTML={{ __html: sanitizedHTML }}
-                    />
-                  );
-                if (contentMode === "md")
-                  return (
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkBreaks]}
-                      rehypePlugins={[rehypeRaw, rehypeSanitize]}
-                    >
-                      {chapter.content as unknown as string}
-                    </ReactMarkdown>
-                  );
-                return <p className="opacity-70">Belum ada konten untuk bab ini.</p>;
-              })()}
+              {mode === "text" && (
+                <div className="max-w-none">
+                  {textParagraphs.map((p, i) => (
+                    <p key={i} className="mb-4 whitespace-pre-wrap leading-8">
+                      {p}
+                    </p>
+                  ))}
+                </div>
+              )}
             </article>
 
-            {/* Bottom Prev/Next */}
-            <div className="mt-8 flex items-center justify-between gap-3">
-              <Link
-                href={prevHref}
-                onClick={(e) => { if (!prevChapter) e.preventDefault(); }}
-                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
-                  prevChapter ? "bg-zinc-800 hover:bg-zinc-700" : "bg-zinc-800/40 cursor-not-allowed"
-                }`}
-              >
-                <ChevronLeft className="h-4 w-4" />
-                Bab Sebelumnya
-              </Link>
+            {/* Sentinel untuk dock floating bar */}
+            <div ref={dockSentinelRef} className="h-6" />
 
-              <Link
-                href={`/novel/${params.slug}#toc`}
-                className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
-              >
-                <List className="h-4 w-4" />
-                Daftar Isi
-              </Link>
-
-              <Link
-                href={nextHref}
-                onClick={(e) => { if (!nextChapter) e.preventDefault(); }}
-                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
-                  nextChapter ? "bg-sky-600 hover:bg-sky-500" : "bg-sky-600/40 cursor-not-allowed"
-                }`}
-              >
-                Bab Berikutnya
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            </div>
-
-            {/* Komentar + Reactions */}
-            <div id="comments" className="mt-10">
+            {/* Komentar */}
+            <section id="comments" className="mt-8">
               <CommentsSection chapterId={String((chapter as any).id)} />
-            </div>
+            </section>
           </>
         )}
       </main>
 
-      {/* FLOATING CONTROL BAR — upgraded */}
+      {/* === FLOATING CIRCLES BAR (tetap, warna ke indigo) === */}
       <div
-        className={`fixed inset-x-0 bottom-6 z-40 transition-opacity ${
-          showUI ? "opacity-100" : "opacity-0 pointer-events-none"
+        className={`${docked ? "relative" : "fixed"} inset-x-0 bottom-6 z-40 transition-opacity ${
+          uiVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
-        <div
-          className="mx-auto w-[min(820px,94vw)] rounded-2xl bg-zinc-900/80 px-4 pt-3 pb-2 shadow-xl ring-1 ring-white/10 backdrop-blur"
-          onClick={(e) => { e.stopPropagation(); toggleUI(); }}
-        >
-          {/* progress + seek */}
-          <div className="mb-3 flex items-center gap-3">
-            <span className="w-12 text-right text-xs tabular-nums text-zinc-300">
-              {progress.toFixed(0)}%
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={progress}
-              onChange={(e) => seekTo(Number(e.target.value))}
-              className="w-full accent-sky-500"
-            />
-            <span className="w-20 text-right text-xs text-sky-300/90">
-              ~{estMin}m
-            </span>
-          </div>
+        <div className="mx-auto w-[min(720px,94vw)]">
+          <div className="flex items-center justify-between px-3">
+            {/* Up/Down di kanan */}
+            <div className="pointer-events-auto fixed right-6 bottom-[112px] flex flex-col gap-3">
+              <button
+                onClick={() =>
+                  window.scrollBy({ top: -window.innerHeight * 0.9, behavior: "smooth" })
+                }
+                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                aria-label="Up"
+              >
+                <ChevronUp className="h-6 w-6" />
+              </button>
+              <button
+                onClick={() =>
+                  window.scrollBy({ top: window.innerHeight * 0.9, behavior: "smooth" })
+                }
+                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                aria-label="Down"
+              >
+                <ChevronDown className="h-6 w-6" />
+              </button>
+            </div>
 
-          <div className="flex items-center justify-between gap-2">
-            {/* left cluster */}
-            <div className="flex items-center gap-2">
+            {/* Bubbles utama – desain sama, aksen indigo */}
+            <div className="pointer-events-auto mx-auto flex gap-4 rounded-full bg-black/20 p-2">
               <Link
                 href={prevHref}
-                onClick={(e) => { if (!prevChapter) e.preventDefault(); }}
-                className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                  prevChapter ? "bg-zinc-800 hover:bg-zinc-700" : "bg-zinc-800/40 cursor-not-allowed"
-                }`}
-                aria-label="Bab sebelumnya"
+                onClick={(e) => {
+                  if (!prevChapter) e.preventDefault();
+                }}
+                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                aria-label="Sebelumnya"
               >
-                <ChevronLeft className="h-5 w-5" />
+                <ArrowLeft className="h-6 w-6" />
               </Link>
 
               <button
-                onClick={(e) => { e.stopPropagation(); setShowSettings((s) => !s); }}
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
+                onClick={() => setShowSettings(true)}
+                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
                 aria-label="Settings"
               >
-                <Settings className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* center cluster */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={(e) => { e.stopPropagation(); setFontScale((v) => Math.max(0.85, v - 0.05)); }}
-                className="rounded-full bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
-                title="A-"
-              >
-                <Type className="mr-1 inline h-4 w-4" />–
-              </button>
-
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-zinc-900 hover:bg-zinc-200">
-                <button
-                  onClick={(e) => { e.stopPropagation(); setAutoScroll((v) => !v); }}
-                  className="inline-flex"
-                  aria-label={autoScroll ? "Pause auto scroll" : "Play auto scroll"}
-                  title="Spasi = Play/Pause"
-                >
-                  {autoScroll ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
-                </button>
-              </div>
-
-              <button
-                onClick={(e) => { e.stopPropagation(); setFontScale((v) => Math.min(1.25, v + 0.05)); }}
-                className="rounded-full bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
-                title="A+"
-              >
-                <Type className="mr-1 inline h-4 w-4" />+
-              </button>
-
-              {/* mini speed slider */}
-              <input
-                type="range"
-                min={20}
-                max={200}
-                value={speed}
-                onChange={(e) => setSpeed(Number(e.target.value))}
-                className="w-32 accent-sky-500"
-                title={`Speed: ${speed}px/s`}
-              />
-            </div>
-
-            {/* right cluster */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  document.querySelector("#comments")?.scrollIntoView({ behavior: "smooth" });
-                }}
-                className="rounded-full bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
-              >
-                <MessageSquare className="mr-1 inline h-4 w-4" />
-                Komentar
+                <Settings className="h-6 w-6" />
               </button>
 
               <button
-                onClick={(e) => { e.stopPropagation(); setImmersive((v) => !v); }}
-                className="rounded-full bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
+                onClick={() => setAutoScroll((v) => !v)}
+                className="grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-white/10 backdrop-blur hover:bg-indigo-500"
+                aria-label={autoScroll ? "Pause" : "Play"}
               >
-                {immersive ? "Exit" : "Immersive"}
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setBookmarked((b) => !b);
-                  const key = `bookmark:${params.slug}:${params.chapter}`;
-                  const now = Date.now();
-                  localStorage.setItem(key, JSON.stringify({ t: now, pct: progress }));
-                  // TODO: sambungkan ke DB bookmark jika diperlukan.
-                }}
-                className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                  bookmarked ? "bg-sky-600 hover:bg-sky-500" : "bg-zinc-800 hover:bg-zinc-700"
-                }`}
-                title="Bookmark"
-                aria-label="Bookmark"
-              >
-                <Bookmark className="h-5 w-5" />
+                {autoScroll ? <Pause className="h-7 w-7" /> : <Play className="h-7 w-7" />}
               </button>
 
               <Link
                 href={nextHref}
-                onClick={(e) => { if (!nextChapter) e.preventDefault(); }}
-                className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                  nextChapter ? "bg-sky-600 hover:bg-sky-500" : "bg-sky-600/40 cursor-not-allowed"
-                }`}
-                aria-label="Bab berikutnya"
+                onClick={(e) => {
+                  if (!nextChapter) e.preventDefault();
+                }}
+                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                aria-label="Daftar isi"
               >
-                <ChevronRight className="h-5 w-5" />
+                <List className="h-6 w-6" />
+              </Link>
+
+              <Link
+                href="/"
+                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                aria-label="Beranda"
+              >
+                <Home className="h-6 w-6" />
               </Link>
             </div>
+
+            <div className="w-12" />
           </div>
         </div>
       </div>
 
-      {/* SIDE UP/DOWN BUTTONS */}
-      <div
-        className={`fixed bottom-6 right-6 z-40 flex flex-col gap-3 transition-opacity ${
-          showUI ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
-      >
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            window.scrollBy({ top: -window.innerHeight * 0.9, behavior: "smooth" });
-          }}
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900/80 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-          aria-label="Scroll up"
-        >
-          <ChevronUp className="h-6 w-6" />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            window.scrollBy({ top: window.innerHeight * 0.9, behavior: "smooth" });
-          }}
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900/80 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-          aria-label="Scroll down"
-        >
-          <ChevronDown className="h-6 w-6" />
-        </button>
-      </div>
-
-      {/* SETTINGS MODAL */}
+      {/* === SETTINGS (tidak diubah, warna fokus ke indigo) === */}
       {showSettings && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+          className="fixed inset-0 z-[60] grid place-items-center bg-black/60 p-4"
           onClick={() => setShowSettings(false)}
         >
           <div
-            className="w-[min(560px,95vw)] rounded-2xl bg-zinc-900 p-5 shadow-2xl ring-1 ring-white/10"
+            className="w-[min(560px,95vw)] rounded-2xl bg-zinc-900 p-5 ring-1 ring-white/10"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-3 text-lg font-semibold">Reader Settings</h3>
-            <div className="space-y-5">
+            <h3 className="text-lg font-semibold">Settings</h3>
+
+            <div className="mt-5 space-y-5">
               <div>
-                <label className="mb-1 block text-sm opacity-80">
-                  Auto-scroll speed (px/s)
-                </label>
+                <label className="mb-2 block text-sm text-zinc-300">Select mirror url</label>
+                <div className="flex gap-2">
+                  <select
+                    value={mirror}
+                    onChange={(e) => setMirror(e.target.value)}
+                    className="w-full rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-600"
+                  >
+                    <option value="">Default</option>
+                    <option value="mirror-1">Mirror 1</option>
+                    <option value="mirror-2">Mirror 2</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm text-zinc-300">Autoscroll Speed</label>
                 <input
                   type="range"
                   min={20}
                   max={200}
                   value={speed}
                   onChange={(e) => setSpeed(Number(e.target.value))}
-                  className="w-full accent-sky-500"
+                  className="w-full accent-indigo-500"
                 />
-                <div className="mt-1 text-sm opacity-70">{speed} px/s</div>
+                <div className="mt-1 text-xs text-zinc-400">{speed} px/s</div>
               </div>
 
               <div>
-                <label className="mb-1 block text-sm opacity-80">Ukuran font</label>
-                <div className="flex items-center gap-2">
+                <label className="mb-2 block text-sm text-zinc-300">Font size</label>
+                <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setFontScale((v) => Math.max(0.85, v - 0.05))}
+                    onClick={() => setFontScale((v) => clamp(v - 0.05, 0.9, 1.25))}
                     className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
                   >
                     A–
                   </button>
-                  <div className="text-sm opacity-70">{(fontScale * 100).toFixed(0)}%</div>
+                  <div className="text-sm text-zinc-400">{Math.round(fontScale * 100)}%</div>
                   <button
-                    onClick={() => setFontScale((v) => Math.min(1.25, v + 0.05))}
+                    onClick={() => setFontScale((v) => clamp(v + 0.05, 0.9, 1.25))}
                     className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
                   >
                     A+
@@ -704,22 +526,18 @@ export default function ReaderPage({ params }: ReaderPageProps) {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => {
-                    setImmersive((v) => !v);
-                    setShowSettings(false);
-                  }}
-                  className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
-                >
-                  {immersive ? "Keluar Mode Baca" : "Masuk Mode Baca"}
-                </button>
-
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => setShowSettings(false)}
-                  className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
+                  className="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
                 >
-                  Close
+                  Later
+                </button>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500"
+                >
+                  Save
                 </button>
               </div>
             </div>

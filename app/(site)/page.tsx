@@ -150,7 +150,7 @@ export default function HomePage() {
         onRefresh={hardRefresh}
         me={me}
         title="Gachaverse"
-        subtitle="Jelajahi karya terbaru. Aksen biru, nyaman dibaca."
+        subtitle="Komunitas dengan mayoritas halu."
         sidebar={list.slice(0, 4).map((n: any) => ({
           id: String(n.id),
           title: n.title,
