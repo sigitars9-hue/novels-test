@@ -29,6 +29,15 @@ import CommentsSection from "@/components/CommentsSection";
 const WPM = 220;
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 function looksLikeHTML(s: string) { return /<\/?[a-z][\s\S]*>/i.test(s); }
+/** Baru: deteksi entity HTML (nbps, amp, &#123;, dll) */
+function hasHtmlEntities(s: string) { return /&(?:nbsp|amp|lt|gt|quot|#\d+);/i.test(s); }
+/** Decoder entity untuk fallback mode text */
+function decodeEntities(s: string) {
+  if (typeof window === "undefined") return s;
+  const el = document.createElement("div");
+  el.innerHTML = s;
+  return el.textContent || el.innerText || "";
+}
 function stripHtml(html: string) {
   const tmp = typeof window !== "undefined" ? document.createElement("div") : null;
   if (!tmp) return html;
@@ -169,16 +178,15 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   const mode: "html" | "md" | "text" = useMemo(() => {
     const raw = String(chapter?.content ?? "");
     if (!raw.trim()) return "text";
-    if (looksLikeHTML(raw)) return "html";
+    // Perubahan penting: anggap HTML juga saat ada HTML entities
+    if (looksLikeHTML(raw) || hasHtmlEntities(raw)) return "html";
     return detectMarkdownStrict(raw) ? "md" : "text";
   }, [chapter?.content]);
 
   // Sanitize HTML (izinkan tag umum dari editor)
   const sanitizedHTML = useMemo(() => {
     if (mode !== "html") return "";
-    // Tambahan: izinkan <u> agar underline dari editor tidak hilang
     (DOMPurify as any).addHook?.("uponSanitizeAttribute", (node: any, data: any) => {
-      // pastikan link aman
       if (data.attrName === "href" && node.tagName === "A") {
         try {
           const u = new URL(data.attrValue, typeof window !== "undefined" ? window.location.origin : "https://x");
@@ -193,17 +201,21 @@ export default function ReaderPage({ params }: ReaderPageProps) {
     } as any);
   }, [mode, chapter?.content]);
 
-  // Untuk konten plain text
+  // Untuk konten plain text (fallback)
   const textParagraphs = useMemo(() => {
-    const raw = String(chapter?.content ?? "").replace(/\r\n/g, "\n").trim();
+    const raw = decodeEntities(String(chapter?.content ?? "")) // decode &nbsp; -> spasi
+      .replace(/\r\n/g, "\n")
+      .trim();
     if (!raw) return [];
     return raw.split(/\n\s*\n+/);
   }, [chapter?.content]);
 
   const words = useMemo(() => {
     const raw = String(chapter?.content ?? "");
-    return looksLikeHTML(raw) ? countWords(stripHtml(raw)) : countWords(raw);
+    const base = looksLikeHTML(raw) || hasHtmlEntities(raw) ? stripHtml(raw) : decodeEntities(raw);
+    return countWords(base);
   }, [chapter?.content]);
+
   const estMin = Math.max(1, Math.round(words / WPM));
 
   /* ===== Auto-hide on scroll ===== */
@@ -402,12 +414,7 @@ export default function ReaderPage({ params }: ReaderPageProps) {
           <>
             {/* Isi bab */}
             <article className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}>
-              {/* ====== PERBAIKAN PENTING UNTUK HTML DARI RICH EDITOR ======
-                   - 'space-y-4' memberi jarak antar elemen block secara umum
-                   - '[&>div]:mb-4 [&>div]:leading-8' membuat <div> paragraf dari editor punya jarak & line-height seperti <p>
-                   - '[&_u]:underline' memastikan <u> terlihat
-                   - '[&_a]:underline' untuk link
-                   - list tetap ditangani oleh .prose */}
+              {/* HTML dari editor atau ada entity -> render sebagai HTML */}
               {mode === "html" && (
                 <div
                   className={
@@ -594,7 +601,7 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         </div>
       </div>
 
-      {/* === SETTINGS: hanya Mode Terang === */}
+      {/* === SETTINGS (mode terang) === */}
       {showSettings && (
         <div
           className="fixed inset-0 z-[60] grid place-items-center bg-black/60 p-4"
