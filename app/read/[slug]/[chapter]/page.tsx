@@ -21,6 +21,7 @@ import {
   List,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 import CommentsSection from "@/components/CommentsSection";
@@ -28,9 +29,7 @@ import CommentsSection from "@/components/CommentsSection";
 /* ===== Helpers ===== */
 const WPM = 220;
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
-function looksLikeHTML(s: string) {
-  return /<\/?[a-z][\s\S]*>/i.test(s);
-}
+function looksLikeHTML(s: string) { return /<\/?[a-z][\s\S]*>/i.test(s); }
 function stripHtml(html: string) {
   const tmp = typeof window !== "undefined" ? document.createElement("div") : null;
   if (!tmp) return html;
@@ -42,11 +41,16 @@ function countWords(s: string) {
   if (!t) return 0;
   return t.split(/\s+/).length;
 }
-/** Deteksi Markdown ketat: hanya jika benar-benar ada sintaks MD */
+/** Deteksi Markdown ketat */
 function detectMarkdownStrict(s: string) {
   const mdHeaderOrList = /(^|\n)\s*(#{1,6}\s|[-*]\s|\d+\.\s)/;
   const mdInline = /(\*\*.+\*\*|__.+__|`[^`]+`|~~.+~~|\[.+\]\(.+\)|!\[.*\]\(.+\))/;
   return mdHeaderOrList.test(s) || mdInline.test(s);
+}
+
+/** Util kelas tema */
+function themeCls(isLight: boolean, light: string, dark: string) {
+  return isLight ? light : dark;
 }
 
 type ReaderPageProps = { params: { slug: string; chapter: string } };
@@ -63,7 +67,7 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   const [nextChapter, setNextChapter] = useState<Chapter | null>(null);
 
   // UI visibility
-  const [uiVisible, setUiVisible] = useState(true); // tap to toggle
+  const [uiVisible, setUiVisible] = useState(true);
   const lastY = useRef(0);
 
   // Auto-scroll
@@ -72,14 +76,26 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef(0);
 
-  // Settings
+  // Theme (baru) – default dark, bisa jadi "light"
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const isLight = theme === "light";
+
+  // Settings modal
   const [showSettings, setShowSettings] = useState(false);
-  const [mirror, setMirror] = useState<string>("");
-  const [fontScale, setFontScale] = useState(1);
 
   // HUD docking (berhenti sebelum komentar)
   const [docked, setDocked] = useState(false);
   const dockSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // load theme
+  useEffect(() => {
+    const t = (localStorage.getItem("readerTheme") as "dark" | "light" | null) || "dark";
+    setTheme(t);
+  }, []);
+  // persist theme
+  useEffect(() => {
+    localStorage.setItem("readerTheme", theme);
+  }, [theme]);
 
   useEffect(() => {
     const obs = new IntersectionObserver(
@@ -121,7 +137,6 @@ export default function ReaderPage({ params }: ReaderPageProps) {
           if (e2) throw e2;
           setChapter((ch as Chapter) || null);
 
-          // prev/next
           if (ch?.id) {
             const [prevQ, nextQ] = await Promise.all([
               supabase
@@ -175,11 +190,9 @@ export default function ReaderPage({ params }: ReaderPageProps) {
     return DOMPurify.sanitize(String(chapter?.content ?? ""));
   }, [mode, chapter?.content]);
 
-  // versi paragraf untuk TEKS biasa (tanpa sintaks MD)
   const textParagraphs = useMemo(() => {
     const raw = String(chapter?.content ?? "").replace(/\r\n/g, "\n").trim();
     if (!raw) return [];
-    // Pisah paragraf di baris kosong; single enter tetap jadi baris baru (di class)
     return raw.split(/\n\s*\n+/).map((p) => p);
   }, [chapter?.content]);
 
@@ -242,33 +255,53 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   /* ===== Render ===== */
   return (
     <div
-      className="min-h-screen bg-zinc-950 text-zinc-100"
+      className={
+        themeCls(
+          isLight,
+          "min-h-screen bg-zinc-50 text-zinc-900",
+          "min-h-screen bg-zinc-950 text-zinc-100"
+        )
+      }
       onClick={() => {
-        if (!uiVisible) setUiVisible(true); // single tap untuk munculkan HUD
+        if (!uiVisible) setUiVisible(true);
       }}
     >
-      {/* === TOP HUD (desain tetap, warna biru gelap) === */}
+      {/* === TOP HUD === */}
       <div
         className={`sticky top-3 z-50 mx-auto w-[min(980px,94vw)] transition-opacity ${
           uiVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
-        <div className="flex items-center justify-between rounded-2xl bg-zinc-900/90 px-4 py-3 ring-1 ring-white/10 backdrop-blur">
+        <div
+          className={
+            themeCls(
+              isLight,
+              "flex items-center justify-between rounded-2xl bg-white/85 px-4 py-3 ring-1 ring-black/10 backdrop-blur",
+              "flex items-center justify-between rounded-2xl bg-zinc-900/90 px-4 py-3 ring-1 ring-white/10 backdrop-blur"
+            )
+          }
+        >
           <Link
             href={`/novel/${params.slug}`}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
+            className={
+              themeCls(
+                isLight,
+                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 ring-1 ring-black/10",
+                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
+              )
+            }
             aria-label="Kembali"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className={themeCls(isLight, "h-5 w-5 text-zinc-800", "h-5 w-5")} />
           </Link>
 
           <div className="min-w-0 px-3 text-center">
-            <div className="truncate font-semibold text-indigo-300">
+            <div className={themeCls(isLight, "truncate font-semibold text-indigo-700", "truncate font-semibold text-indigo-300")}>
               {novel?.title ?? "—"}
             </div>
             <div className="truncate text-sm">
-              <span className="opacity-50">›</span>{" "}
-              <span className="text-indigo-400">
+              <span className={themeCls(isLight, "opacity-60", "opacity-50")}>›</span>{" "}
+              <span className={themeCls(isLight, "text-indigo-600", "text-indigo-400")}>
                 {chapter ? `Ch ${chapter.number}` : "—"}
               </span>
             </div>
@@ -276,10 +309,16 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
           <Link
             href="/"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
+            className={
+              themeCls(
+                isLight,
+                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 ring-1 ring-black/10",
+                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
+              )
+            }
             aria-label="Beranda"
           >
-            <Home className="h-5 w-5" />
+            <Home className={themeCls(isLight, "h-5 w-5 text-zinc-800", "h-5 w-5")} />
           </Link>
         </div>
       </div>
@@ -295,65 +334,91 @@ export default function ReaderPage({ params }: ReaderPageProps) {
           }
         }}
         style={{
-          fontSize: `clamp(1rem, ${fontScale}rem, 1.25rem)`,
+          fontSize: `clamp(1rem, ${1}rem, 1.25rem)`,
           lineHeight: 1.9,
         }}
       >
         {!loading && !err && novel && chapter && (
-          <section className="mb-4 rounded-2xl bg-zinc-900/60 p-4 ring-1 ring-white/10">
-            <h1 className="text-xl font-extrabold leading-tight text-indigo-300">
+          <section
+            className={
+              themeCls(
+                isLight,
+                "mb-4 rounded-2xl bg-white/70 p-4 ring-1 ring-black/10",
+                "mb-4 rounded-2xl bg-zinc-900/60 p-4 ring-1 ring-white/10"
+              )
+            }
+          >
+            <h1 className={themeCls(isLight, "text-xl font-extrabold leading-tight text-indigo-700", "text-xl font-extrabold leading-tight text-indigo-300")}>
               {chapter.title ? chapter.title : `Bab ${chapter.number}`}
             </h1>
-            <div className="mt-1 text-xs text-zinc-300/90">
+            <div className={themeCls(isLight, "mt-1 text-xs text-zinc-600", "mt-1 text-xs text-zinc-300/90")}>
               {novel.title} · {words} kata · ~{estMin} menit baca
             </div>
           </section>
         )}
 
         {loading && (
-          <div className="mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm">
+          <div
+            className={
+              themeCls(
+                isLight,
+                "mx-auto mt-10 w-fit rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700",
+                "mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm"
+              )
+            }
+          >
             Memuat…
           </div>
         )}
 
         {!loading && err && (
-          <div className="mx-auto mt-10 w-fit rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200">
+          <div
+            className={
+              themeCls(
+                isLight,
+                "mx-auto mt-10 w-fit rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700",
+                "mx-auto mt-10 w-fit rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200"
+              )
+            }
+          >
             {err}
           </div>
         )}
 
         {!loading && !err && (!novel || !chapter) && (
-          <div className="mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm">
+          <div
+            className={
+              themeCls(
+                isLight,
+                "mx-auto mt-10 w-fit rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700",
+                "mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm"
+              )
+            }
+          >
             Bab tidak ditemukan.
           </div>
         )}
 
         {!loading && !err && novel && chapter && (
           <>
-            {/* Isi bab: perbaikan Markdown & teks biasa */}
-            <article className="prose prose-invert max-w-none">
+            {/* Isi bab */}
+            <article className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}>
               {mode === "html" && (
                 <div
-                  className="prose prose-invert max-w-none"
+                  className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
                   dangerouslySetInnerHTML={{ __html: sanitizedHTML }}
                 />
               )}
 
               {mode === "md" && (
                 <ReactMarkdown
-                  remarkPlugins={[
-                    remarkGfm,
-                    remarkBreaks, // enter = line break
-                  ]}
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
                   rehypePlugins={[rehypeRaw, rehypeSanitize]}
                   components={{
-                    // pastikan spasi/enter tidak “nempel”
                     p: (props) => (
                       <p className="whitespace-pre-wrap leading-8" {...props} />
                     ),
-                    li: (props) => (
-                      <li className="whitespace-pre-wrap" {...props} />
-                    ),
+                    li: (props) => <li className="whitespace-pre-wrap" {...props} />,
                   }}
                 >
                   {String(chapter.content ?? "")}
@@ -374,7 +439,7 @@ export default function ReaderPage({ params }: ReaderPageProps) {
             {/* Sentinel untuk dock floating bar */}
             <div ref={dockSentinelRef} className="h-6" />
 
-            {/* Komentar */}
+            {/* Komentar (tetap) */}
             <section id="comments" className="mt-8">
               <CommentsSection chapterId={String((chapter as any).id)} />
             </section>
@@ -382,7 +447,7 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         )}
       </main>
 
-      {/* === FLOATING CIRCLES BAR (tetap, warna ke indigo) === */}
+      {/* === FLOATING CIRCLES BAR === */}
       <div
         className={`${docked ? "relative" : "fixed"} inset-x-0 bottom-6 z-40 transition-opacity ${
           uiVisible ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -396,68 +461,116 @@ export default function ReaderPage({ params }: ReaderPageProps) {
                 onClick={() =>
                   window.scrollBy({ top: -window.innerHeight * 0.9, behavior: "smooth" })
                 }
-                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                className={
+                  themeCls(
+                    isLight,
+                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                  )
+                }
                 aria-label="Up"
               >
-                <ChevronUp className="h-6 w-6" />
+                <ChevronUp className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
               </button>
               <button
                 onClick={() =>
                   window.scrollBy({ top: window.innerHeight * 0.9, behavior: "smooth" })
                 }
-                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                className={
+                  themeCls(
+                    isLight,
+                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                  )
+                }
                 aria-label="Down"
               >
-                <ChevronDown className="h-6 w-6" />
+                <ChevronDown className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
               </button>
             </div>
 
-            {/* Bubbles utama – desain sama, aksen indigo */}
-            <div className="pointer-events-auto mx-auto flex gap-4 rounded-full bg-black/20 p-2">
+            {/* Bubbles utama */}
+            <div
+              className={
+                themeCls(
+                  isLight,
+                  "pointer-events-auto mx-auto flex gap-4 rounded-full bg-zinc-900/5 p-2 ring-1 ring-black/10",
+                  "pointer-events-auto mx-auto flex gap-4 rounded-full bg-black/20 p-2"
+                )
+              }
+            >
               <Link
                 href={prevHref}
-                onClick={(e) => {
-                  if (!prevChapter) e.preventDefault();
-                }}
-                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                onClick={(e) => { if (!prevChapter) e.preventDefault(); }}
+                className={
+                  themeCls(
+                    isLight,
+                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                  )
+                }
                 aria-label="Sebelumnya"
               >
-                <ArrowLeft className="h-6 w-6" />
+                <ArrowLeft className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
               </Link>
 
               <button
                 onClick={() => setShowSettings(true)}
-                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                className={
+                  themeCls(
+                    isLight,
+                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                  )
+                }
                 aria-label="Settings"
               >
-                <Settings className="h-6 w-6" />
+                <Settings className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
               </button>
 
               <button
                 onClick={() => setAutoScroll((v) => !v)}
-                className="grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-white/10 backdrop-blur hover:bg-indigo-500"
+                className={
+                  themeCls(
+                    isLight,
+                    "grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-black/10 backdrop-blur hover:bg-indigo-500",
+                    "grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-white/10 backdrop-blur hover:bg-indigo-500"
+                  )
+                }
                 aria-label={autoScroll ? "Pause" : "Play"}
               >
                 {autoScroll ? <Pause className="h-7 w-7" /> : <Play className="h-7 w-7" />}
               </button>
 
-              <Link
-                href={nextHref}
-                onClick={(e) => {
-                  if (!nextChapter) e.preventDefault();
-                }}
-                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-                aria-label="Daftar isi"
-              >
-                <List className="h-6 w-6" />
-              </Link>
+<Link
+  href={nextHref}
+  onClick={(e) => { if (!nextChapter) e.preventDefault(); }}
+  className={
+    themeCls(
+      isLight,
+      "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+      "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+    )
+  }
+  aria-label="Bab berikutnya"
+  title="Bab berikutnya"
+>
+  <ChevronRight className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
+</Link>
+
 
               <Link
                 href="/"
-                className="grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                className={
+                  themeCls(
+                    isLight,
+                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                  )
+                }
                 aria-label="Beranda"
               >
-                <Home className="h-6 w-6" />
+                <Home className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
               </Link>
             </div>
 
@@ -466,78 +579,89 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         </div>
       </div>
 
-      {/* === SETTINGS (tidak diubah, warna fokus ke indigo) === */}
+      {/* === SETTINGS: hanya Mode Terang === */}
       {showSettings && (
         <div
           className="fixed inset-0 z-[60] grid place-items-center bg-black/60 p-4"
           onClick={() => setShowSettings(false)}
         >
           <div
-            className="w-[min(560px,95vw)] rounded-2xl bg-zinc-900 p-5 ring-1 ring-white/10"
+            className={
+              themeCls(
+                isLight,
+                "w-[min(560px,95vw)] rounded-2xl bg-white p-5 ring-1 ring-black/10",
+                "w-[min(560px,95vw)] rounded-2xl bg-zinc-900 p-5 ring-1 ring-white/10"
+              )
+            }
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold">Settings</h3>
+            <h3 className={themeCls(isLight, "text-lg font-semibold text-zinc-900", "text-lg font-semibold")}>
+              Pengaturan
+            </h3>
 
             <div className="mt-5 space-y-5">
-              <div>
-                <label className="mb-2 block text-sm text-zinc-300">Select mirror url</label>
-                <div className="flex gap-2">
-                  <select
-                    value={mirror}
-                    onChange={(e) => setMirror(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-600"
-                  >
-                    <option value="">Default</option>
-                    <option value="mirror-1">Mirror 1</option>
-                    <option value="mirror-2">Mirror 2</option>
-                  </select>
+              <div
+                className={
+                  themeCls(
+                    isLight,
+                    "flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-3",
+                    "flex items-center justify-between rounded-xl border border-white/10 bg-zinc-800/60 px-3 py-3"
+                  )
+                }
+              >
+                <div>
+                  <div className={themeCls(isLight, "text-sm font-semibold text-zinc-900", "text-sm font-semibold")}>
+                    Mode Terang
+                  </div>
+                  <div className={themeCls(isLight, "text-xs text-zinc-600", "text-xs text-zinc-400")}>
+                    Aktifkan tampilan terang untuk halaman baca ini.
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="mb-2 block text-sm text-zinc-300">Autoscroll Speed</label>
-                <input
-                  type="range"
-                  min={20}
-                  max={200}
-                  value={speed}
-                  onChange={(e) => setSpeed(Number(e.target.value))}
-                  className="w-full accent-indigo-500"
-                />
-                <div className="mt-1 text-xs text-zinc-400">{speed} px/s</div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm text-zinc-300">Font size</label>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setFontScale((v) => clamp(v - 0.05, 0.9, 1.25))}
-                    className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
-                  >
-                    A–
-                  </button>
-                  <div className="text-sm text-zinc-400">{Math.round(fontScale * 100)}%</div>
-                  <button
-                    onClick={() => setFontScale((v) => clamp(v + 0.05, 0.9, 1.25))}
-                    className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
-                  >
-                    A+
-                  </button>
-                </div>
+                {/* Toggle */}
+                <button
+                  onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+                  className={
+                    isLight
+                      ? "relative h-7 w-12 rounded-full bg-indigo-600 transition-colors"
+                      : "relative h-7 w-12 rounded-full bg-zinc-500/50 transition-colors"
+                  }
+                  aria-label="Toggle Mode Terang"
+                >
+                  <span
+                    className={
+                      isLight
+                        ? "absolute left-[calc(100%-1.65rem)] top-0.5 inline-block h-6 w-6 rounded-full bg-white shadow"
+                        : "absolute left-0.5 top-0.5 inline-block h-6 w-6 rounded-full bg-white shadow"
+                    }
+                  />
+                </button>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => setShowSettings(false)}
-                  className="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+                  className={
+                    themeCls(
+                      isLight,
+                      "rounded-lg bg-zinc-100 px-4 py-2 text-sm text-zinc-800 ring-1 ring-black/10 hover:bg-zinc-200",
+                      "rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+                    )
+                  }
                 >
-                  Later
+                  Tutup
                 </button>
                 <button
                   onClick={() => setShowSettings(false)}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500"
+                  className={
+                    themeCls(
+                      isLight,
+                      "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500",
+                      "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500"
+                    )
+                  }
                 >
-                  Save
+                  Selesai
                 </button>
               </div>
             </div>

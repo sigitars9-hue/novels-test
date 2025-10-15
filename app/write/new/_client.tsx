@@ -21,10 +21,15 @@ import {
   BookOpen,
 } from "lucide-react";
 
-/* ─────────────── Rich Editor mini ─────────────── */
 function EditorToolbar({ exec }: { exec: (cmd: string, val?: string) => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded-xl border border-white/10 bg-zinc-900/70 p-1">
+    <div
+      className="
+        flex flex-wrap items-center gap-1
+        rounded-xl border border-white/10 bg-zinc-900/80 backdrop-blur
+        px-2 py-1 shadow-sm
+      "
+    >
       <button type="button" onClick={() => exec("bold")} className="rounded-lg px-2 py-1 hover:bg-white/10" title="Bold">
         <Bold className="h-4 w-4" />
       </button>
@@ -60,13 +65,21 @@ function EditorToolbar({ exec }: { exec: (cmd: string, val?: string) => void }) 
 }
 
 function RichEditor({
-  value, onChange, placeholder,
-}: { value: string; onChange: (html: string) => void; placeholder?: string }) {
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (html: string) => void;
+  placeholder?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+
   const exec = (cmd: string, val?: string) => {
     document.execCommand(cmd, false, val);
     if (ref.current) onChange(ref.current.innerHTML);
   };
+
   useEffect(() => {
     if (ref.current && ref.current.innerHTML !== value) {
       ref.current.innerHTML = value || "";
@@ -74,22 +87,42 @@ function RichEditor({
   }, [value]);
 
   return (
-    <div className="space-y-2">
-      <EditorToolbar exec={exec} />
+    <div className="relative">
+      {/* Spacer supaya konten tidak ketutup toolbar yang nempel di atas */}
+      <div className="h-12 sm:h-10" />
+
+      {/* Toolbar sticky di paling atas container; aman untuk notch */}
+      <div
+        className="
+          sticky z-30 -mt-12 sm:-mt-10
+          px-1
+        "
+        style={{
+          // dorong sedikit dari tepi atas + perhatikan safe area iOS
+          top: "calc(env(safe-area-inset-top, 0px) + 8px)",
+        }}
+      >
+        <EditorToolbar exec={exec} />
+      </div>
+
+      {/* Area edit */}
       <div
         ref={ref}
         contentEditable
         onInput={() => ref.current && onChange(ref.current.innerHTML)}
         data-placeholder={placeholder || "Tulis di sini..."}
-        className="min-h-[260px] w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 outline-none ring-1 ring-transparent transition focus:ring-sky-500
-                   prose prose-invert max-w-none
-                   empty:before:text-zinc-500/70 empty:before:content-[attr(data-placeholder)]"
+        className="
+          min-h-[260px] w-full rounded-xl border border-white/10 bg-zinc-900
+          px-3 py-3 outline-none ring-1 ring-transparent transition focus:ring-sky-500
+          prose prose-invert max-w-none
+          empty:before:text-zinc-500/70 empty:before:content-[attr(data-placeholder)]
+        "
         style={{ wordBreak: "break-word" }}
       />
     </div>
   );
 }
-/* ──────────────────────────────────────────────── */
+
 
 type Msg = { type: "success" | "error" | "info"; text: string };
 type NovelLite = { id: string; title: string; cover_url: string | null; tags: string[] | null };
