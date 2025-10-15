@@ -28,16 +28,8 @@ import CommentsSection from "@/components/CommentsSection";
 /* ===== Helpers ===== */
 const WPM = 220;
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
-function looksLikeHTML(s: string) { return /<\/?[a-z][\s\S]*>/i.test(s); }
-/** Baru: deteksi entity HTML (nbps, amp, &#123;, dll) */
-function hasHtmlEntities(s: string) { return /&(?:nbsp|amp|lt|gt|quot|#\d+);/i.test(s); }
-/** Decoder entity untuk fallback mode text */
-function decodeEntities(s: string) {
-  if (typeof window === "undefined") return s;
-  const el = document.createElement("div");
-  el.innerHTML = s;
-  return el.textContent || el.innerText || "";
-}
+const looksLikeHTML = (s: string) => /<\/?[a-z][\s\S]*>/i.test(s);
+
 function stripHtml(html: string) {
   const tmp = typeof window !== "undefined" ? document.createElement("div") : null;
   if (!tmp) return html;
@@ -49,11 +41,21 @@ function countWords(s: string) {
   if (!t) return 0;
   return t.split(/\s+/).length;
 }
+
+function normalizeForMarkdown(s: string) {
+  if (!s) return "";
+  return s
+    .replace(/&nbsp;/gi, " ")           // entity NBSP -> spasi
+    .replace(/\u00A0/g, " ")            // NBSP char -> spasi
+    .replace(/[\u200B-\u200D\uFEFF]/g, ""); // zero-width
+}
+/** Deteksi Markdown ketat */
 function detectMarkdownStrict(s: string) {
   const mdHeaderOrList = /(^|\n)\s*(#{1,6}\s|[-*]\s|\d+\.\s)/;
-  const mdInline = /(\*\*.+\*\*|__.+__|`[^`]+`|~~.+~~|\[.+\]\(.+\)|!\[.*\]\(.+\))/;
+  const mdInline = /(\*\*.+?\*\*|__.+?__|`[^`]+`|~~.+?~~|\[.+?\]\(.+?\)|!\[.*?\]\(.+?\))/;
   return mdHeaderOrList.test(s) || mdInline.test(s);
 }
+/** Util kelas tema */
 function themeCls(isLight: boolean, light: string, dark: string) {
   return isLight ? light : dark;
 }
@@ -81,7 +83,7 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef(0);
 
-  // Theme (dark/light)
+  // Theme – default dark, bisa "light"
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const isLight = theme === "light";
 
@@ -92,12 +94,14 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   const [docked, setDocked] = useState(false);
   const dockSentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // load theme
+  // load/persist theme
   useEffect(() => {
     const t = (localStorage.getItem("readerTheme") as "dark" | "light" | null) || "dark";
     setTheme(t);
   }, []);
-  useEffect(() => { localStorage.setItem("readerTheme", theme); }, [theme]);
+  useEffect(() => {
+    localStorage.setItem("readerTheme", theme);
+  }, [theme]);
 
   useEffect(() => {
     const obs = new IntersectionObserver(
@@ -171,51 +175,35 @@ export default function ReaderPage({ params }: ReaderPageProps) {
       }
     })();
 
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [params.slug, params.chapter]);
 
   /* ===== Mode konten & sanitasi ===== */
+  const rawContent = String(chapter?.content ?? "");
+  const normalizedMD = useMemo(() => normalizeForMarkdown(rawContent), [rawContent]);
+
   const mode: "html" | "md" | "text" = useMemo(() => {
-    const raw = String(chapter?.content ?? "");
-    if (!raw.trim()) return "text";
-    // Perubahan penting: anggap HTML juga saat ada HTML entities
-    if (looksLikeHTML(raw) || hasHtmlEntities(raw)) return "html";
-    return detectMarkdownStrict(raw) ? "md" : "text";
-  }, [chapter?.content]);
+    if (!normalizedMD.trim()) return "text";
+    if (looksLikeHTML(rawContent)) return "html"; // jika konten memang HTML
+    return detectMarkdownStrict(normalizedMD) ? "md" : "text";
+  }, [rawContent, normalizedMD]);
 
-  // Sanitize HTML (izinkan tag umum dari editor)
-  const sanitizedHTML = useMemo(() => {
-    if (mode !== "html") return "";
-    (DOMPurify as any).addHook?.("uponSanitizeAttribute", (node: any, data: any) => {
-      if (data.attrName === "href" && node.tagName === "A") {
-        try {
-          const u = new URL(data.attrValue, typeof window !== "undefined" ? window.location.origin : "https://x");
-          if (!["http:", "https:"].includes(u.protocol)) data.keepAttr = false;
-        } catch { data.keepAttr = false; }
-      }
-    });
-    return DOMPurify.sanitize(String(chapter?.content ?? ""), {
-      ADD_TAGS: ["u"],
-      ADD_ATTR: ["target", "rel"],
-      ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-    } as any);
-  }, [mode, chapter?.content]);
+  const sanitizedHTML = useMemo(
+    () => (mode === "html" ? DOMPurify.sanitize(rawContent) : ""),
+    [mode, rawContent]
+  );
 
-  // Untuk konten plain text (fallback)
   const textParagraphs = useMemo(() => {
-    const raw = decodeEntities(String(chapter?.content ?? "")) // decode &nbsp; -> spasi
-      .replace(/\r\n/g, "\n")
-      .trim();
-    if (!raw) return [];
-    return raw.split(/\n\s*\n+/);
-  }, [chapter?.content]);
+    const s = normalizeForMarkdown(rawContent).replace(/\r\n/g, "\n").trim();
+    if (!s) return [];
+    return s.split(/\n\s*\n+/).map((p) => p);
+  }, [rawContent]);
 
   const words = useMemo(() => {
-    const raw = String(chapter?.content ?? "");
-    const base = looksLikeHTML(raw) || hasHtmlEntities(raw) ? stripHtml(raw) : decodeEntities(raw);
-    return countWords(base);
-  }, [chapter?.content]);
-
+    return looksLikeHTML(rawContent) ? countWords(stripHtml(rawContent)) : countWords(normalizedMD);
+  }, [rawContent, normalizedMD]);
   const estMin = Math.max(1, Math.round(words / WPM));
 
   /* ===== Auto-hide on scroll ===== */
@@ -271,13 +259,7 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   /* ===== Render ===== */
   return (
     <div
-      className={
-        themeCls(
-          isLight,
-          "min-h-screen bg-zinc-50 text-zinc-900",
-          "min-h-screen bg-zinc-950 text-zinc-100"
-        )
-      }
+      className={themeCls(isLight, "min-h-screen bg-zinc-50 text-zinc-900", "min-h-screen bg-zinc-950 text-zinc-100")}
       onClick={() => { if (!uiVisible) setUiVisible(true); }}
     >
       {/* === TOP HUD === */}
@@ -287,23 +269,19 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         }`}
       >
         <div
-          className={
-            themeCls(
-              isLight,
-              "flex items-center justify-between rounded-2xl bg-white/85 px-4 py-3 ring-1 ring-black/10 backdrop-blur",
-              "flex items-center justify-between rounded-2xl bg-zinc-900/90 px-4 py-3 ring-1 ring-white/10 backdrop-blur"
-            )
-          }
+          className={themeCls(
+            isLight,
+            "flex items-center justify-between rounded-2xl bg-white/85 px-4 py-3 ring-1 ring-black/10 backdrop-blur",
+            "flex items-center justify-between rounded-2xl bg-zinc-900/90 px-4 py-3 ring-1 ring-white/10 backdrop-blur"
+          )}
         >
           <Link
             href={`/novel/${params.slug}`}
-            className={
-              themeCls(
-                isLight,
-                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 ring-1 ring-black/10",
-                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
-              )
-            }
+            className={themeCls(
+              isLight,
+              "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 ring-1 ring-black/10",
+              "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
+            )}
             aria-label="Kembali"
           >
             <ArrowLeft className={themeCls(isLight, "h-5 w-5 text-zinc-800", "h-5 w-5")} />
@@ -323,13 +301,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
           <Link
             href="/"
-            className={
-              themeCls(
-                isLight,
-                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 ring-1 ring-black/10",
-                "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
-              )
-            }
+            className={themeCls(
+              isLight,
+              "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 ring-1 ring-black/10",
+              "inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700"
+            )}
             aria-label="Beranda"
           >
             <Home className={themeCls(isLight, "h-5 w-5 text-zinc-800", "h-5 w-5")} />
@@ -351,13 +327,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
       >
         {!loading && !err && novel && chapter && (
           <section
-            className={
-              themeCls(
-                isLight,
-                "mb-4 rounded-2xl bg-white/70 p-4 ring-1 ring-black/10",
-                "mb-4 rounded-2xl bg-zinc-900/60 p-4 ring-1 ring-white/10"
-              )
-            }
+            className={themeCls(
+              isLight,
+              "mb-4 rounded-2xl bg-white/70 p-4 ring-1 ring-black/10",
+              "mb-4 rounded-2xl bg-zinc-900/60 p-4 ring-1 ring-white/10"
+            )}
           >
             <h1 className={themeCls(isLight, "text-xl font-extrabold leading-tight text-indigo-700", "text-xl font-extrabold leading-tight text-indigo-300")}>
               {chapter.title ? chapter.title : `Bab ${chapter.number}`}
@@ -369,43 +343,31 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         )}
 
         {loading && (
-          <div
-            className={
-              themeCls(
-                isLight,
-                "mx-auto mt-10 w-fit rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700",
-                "mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm"
-              )
-            }
-          >
+          <div className={themeCls(
+            isLight,
+            "mx-auto mt-10 w-fit rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700",
+            "mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm"
+          )}>
             Memuat…
           </div>
         )}
 
         {!loading && err && (
-          <div
-            className={
-              themeCls(
-                isLight,
-                "mx-auto mt-10 w-fit rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700",
-                "mx-auto mt-10 w-fit rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200"
-              )
-            }
-          >
+          <div className={themeCls(
+            isLight,
+            "mx-auto mt-10 w-fit rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700",
+            "mx-auto mt-10 w-fit rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200"
+          )}>
             {err}
           </div>
         )}
 
         {!loading && !err && (!novel || !chapter) && (
-          <div
-            className={
-              themeCls(
-                isLight,
-                "mx-auto mt-10 w-fit rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700",
-                "mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm"
-              )
-            }
-          >
+          <div className={themeCls(
+            isLight,
+            "mx-auto mt-10 w-fit rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700",
+            "mx-auto mt-10 w-fit rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm"
+          )}>
             Bab tidak ditemukan.
           </div>
         )}
@@ -414,26 +376,9 @@ export default function ReaderPage({ params }: ReaderPageProps) {
           <>
             {/* Isi bab */}
             <article className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}>
-              {/* HTML dari editor atau ada entity -> render sebagai HTML */}
               {mode === "html" && (
                 <div
-                  className={
-                    themeCls(
-                      isLight,
-                      [
-                        "prose max-w-none space-y-4",
-                        "[&>div]:mb-4 [&>div]:leading-8",
-                        "[&_u]:underline",
-                        "[&_a]:underline",
-                      ].join(" "),
-                      [
-                        "prose prose-invert max-w-none space-y-4",
-                        "[&>div]:mb-4 [&>div]:leading-8",
-                        "[&_u]:underline",
-                        "[&_a]:underline",
-                      ].join(" ")
-                    )
-                  }
+                  className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
                   dangerouslySetInnerHTML={{ __html: sanitizedHTML }}
                 />
               )}
@@ -445,10 +390,9 @@ export default function ReaderPage({ params }: ReaderPageProps) {
                   components={{
                     p: (props) => <p className="whitespace-pre-wrap leading-8" {...props} />,
                     li: (props) => <li className="whitespace-pre-wrap" {...props} />,
-                    a: (props) => <a className="underline" target="_blank" rel="noopener noreferrer" {...props} />,
                   }}
                 >
-                  {String(chapter.content ?? "")}
+                  {normalizedMD}
                 </ReactMarkdown>
               )}
 
@@ -486,26 +430,22 @@ export default function ReaderPage({ params }: ReaderPageProps) {
             <div className="pointer-events-auto fixed right-6 bottom-[112px] flex flex-col gap-3">
               <button
                 onClick={() => window.scrollBy({ top: -window.innerHeight * 0.9, behavior: "smooth" })}
-                className={
-                  themeCls(
-                    isLight,
-                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
-                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                  "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                )}
                 aria-label="Up"
               >
                 <ChevronUp className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
               </button>
               <button
                 onClick={() => window.scrollBy({ top: window.innerHeight * 0.9, behavior: "smooth" })}
-                className={
-                  themeCls(
-                    isLight,
-                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
-                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                  "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                )}
                 aria-label="Down"
               >
                 <ChevronDown className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
@@ -513,25 +453,19 @@ export default function ReaderPage({ params }: ReaderPageProps) {
             </div>
 
             {/* Bubbles utama */}
-            <div
-              className={
-                themeCls(
-                  isLight,
-                  "pointer-events-auto mx-auto flex gap-4 rounded-full bg-zinc-900/5 p-2 ring-1 ring-black/10",
-                  "pointer-events-auto mx-auto flex gap-4 rounded-full bg-black/20 p-2"
-                )
-              }
-            >
+            <div className={themeCls(
+              isLight,
+              "pointer-events-auto mx-auto flex gap-4 rounded-full bg-zinc-900/5 p-2 ring-1 ring-black/10",
+              "pointer-events-auto mx-auto flex gap-4 rounded-full bg-black/20 p-2"
+            )}>
               <Link
                 href={prevHref}
                 onClick={(e) => { if (!prevChapter) e.preventDefault(); }}
-                className={
-                  themeCls(
-                    isLight,
-                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
-                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                  "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                )}
                 aria-label="Sebelumnya"
               >
                 <ArrowLeft className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
@@ -539,13 +473,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
               <button
                 onClick={() => setShowSettings(true)}
-                className={
-                  themeCls(
-                    isLight,
-                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
-                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                  "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                )}
                 aria-label="Settings"
               >
                 <Settings className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
@@ -553,13 +485,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
               <button
                 onClick={() => setAutoScroll((v) => !v)}
-                className={
-                  themeCls(
-                    isLight,
-                    "grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-black/10 backdrop-blur hover:bg-indigo-500",
-                    "grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-white/10 backdrop-blur hover:bg-indigo-500"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-black/10 backdrop-blur hover:bg-indigo-500",
+                  "grid h-12 w-12 place-items-center rounded-full bg-indigo-600 text-white ring-1 ring-white/10 backdrop-blur hover:bg-indigo-500"
+                )}
                 aria-label={autoScroll ? "Pause" : "Play"}
               >
                 {autoScroll ? <Pause className="h-7 w-7" /> : <Play className="h-7 w-7" />}
@@ -568,13 +498,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
               <Link
                 href={nextHref}
                 onClick={(e) => { if (!nextChapter) e.preventDefault(); }}
-                className={
-                  themeCls(
-                    isLight,
-                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
-                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                  "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                )}
                 aria-label="Bab berikutnya"
                 title="Bab berikutnya"
               >
@@ -583,13 +511,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
               <Link
                 href="/"
-                className={
-                  themeCls(
-                    isLight,
-                    "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
-                    "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "grid h-12 w-12 place-items-center rounded-full bg-white/85 ring-1 ring-black/10 backdrop-blur hover:bg-white",
+                  "grid h-12 w-12 place-items-center rounded-full bg-zinc-900/90 ring-1 ring-white/10 backdrop-blur hover:bg-zinc-800"
+                )}
                 aria-label="Beranda"
               >
                 <Home className={themeCls(isLight, "h-6 w-6 text-zinc-800", "h-6 w-6")} />
@@ -601,20 +527,18 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         </div>
       </div>
 
-      {/* === SETTINGS (mode terang) === */}
+      {/* === SETTINGS: Mode Terang === */}
       {showSettings && (
         <div
           className="fixed inset-0 z-[60] grid place-items-center bg-black/60 p-4"
           onClick={() => setShowSettings(false)}
         >
           <div
-            className={
-              themeCls(
-                isLight,
-                "w-[min(560px,95vw)] rounded-2xl bg-white p-5 ring-1 ring-black/10",
-                "w-[min(560px,95vw)] rounded-2xl bg-zinc-900 p-5 ring-1 ring-white/10"
-              )
-            }
+            className={themeCls(
+              isLight,
+              "w-[min(560px,95vw)] rounded-2xl bg-white p-5 ring-1 ring-black/10",
+              "w-[min(560px,95vw)] rounded-2xl bg-zinc-900 p-5 ring-1 ring-white/10"
+            )}
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className={themeCls(isLight, "text-lg font-semibold text-zinc-900", "text-lg font-semibold")}>
@@ -623,13 +547,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
             <div className="mt-5 space-y-5">
               <div
-                className={
-                  themeCls(
-                    isLight,
-                    "flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-3",
-                    "flex items-center justify-between rounded-xl border border-white/10 bg-zinc-800/60 px-3 py-3"
-                  )
-                }
+                className={themeCls(
+                  isLight,
+                  "flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-3",
+                  "flex items-center justify-between rounded-xl border border-white/10 bg-zinc-800/60 px-3 py-3"
+                )}
               >
                 <div>
                   <div className={themeCls(isLight, "text-sm font-semibold text-zinc-900", "text-sm font-semibold")}>
@@ -640,9 +562,11 @@ export default function ReaderPage({ params }: ReaderPageProps) {
                   </div>
                 </div>
 
+                {/* Toggle */}
                 <button
                   onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-                  className={isLight ? "relative h-7 w-12 rounded-full bg-indigo-600 transition-colors" : "relative h-7 w-12 rounded-full bg-zinc-500/50 transition-colors"}
+                  className={isLight ? "relative h-7 w-12 rounded-full bg-indigo-600 transition-colors"
+                                      : "relative h-7 w-12 rounded-full bg-zinc-500/50 transition-colors"}
                   aria-label="Toggle Mode Terang"
                 >
                   <span
@@ -656,25 +580,21 @@ export default function ReaderPage({ params }: ReaderPageProps) {
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => setShowSettings(false)}
-                  className={
-                    themeCls(
-                      isLight,
-                      "rounded-lg bg-zinc-100 px-4 py-2 text-sm text-zinc-800 ring-1 ring-black/10 hover:bg-zinc-200",
-                      "rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
-                    )
-                  }
+                  className={themeCls(
+                    isLight,
+                    "rounded-lg bg-zinc-100 px-4 py-2 text-sm text-zinc-800 ring-1 ring-black/10 hover:bg-zinc-200",
+                    "rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+                  )}
                 >
                   Tutup
                 </button>
                 <button
                   onClick={() => setShowSettings(false)}
-                  className={
-                    themeCls(
-                      isLight,
-                      "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500",
-                      "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500"
-                    )
-                  }
+                  className={themeCls(
+                    isLight,
+                    "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500",
+                    "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500"
+                  )}
                 >
                   Selesai
                 </button>
