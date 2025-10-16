@@ -27,10 +27,8 @@ const normalizePlain = (s: string) =>
     .replace(/\u00A0/g, " ")
     .replace(/[\u200B-\u200D\uFEFF]/g, "");
 
-/** Markdown-lite (WhatsApp-style + basic headings) -> HTML */
 function mdToHtml(src: string) {
   if (!src) return "";
-
   let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   s = s.replace(/\r\n/g, "\n");
 
@@ -48,10 +46,10 @@ function mdToHtml(src: string) {
   s = s.replace(/`([^`]+?)`/g, '<code class="rounded bg-black/30 px-1 py-0.5">$1</code>');
 
   // WhatsApp-style emphasis
-  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");            // **bold**
-  s = s.replace(/\*(?!\s)([^*]+?)(?<!\s)\*/g, "<strong>$1</strong>"); // *bold*
-  s = s.replace(/_(?!\s)([^_]+?)(?<!\s)_/g, "<em>$1</em>");          // _italic_
-  s = s.replace(/~(?!\s)([^~]+?)(?<!\s)~/g, "<del>$1</del>");        // ~strike~
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*(?!\s)([^*]+?)(?<!\s)\*/g, "<strong>$1</strong>");
+  s = s.replace(/_(?!\s)([^_]+?)(?<!\s)_/g, "<em>$1</em>");
+  s = s.replace(/~(?!\s)([^~]+?)(?<!\s)~/g, "<del>$1</del>");
 
   // Image
   s = s.replace(
@@ -59,7 +57,7 @@ function mdToHtml(src: string) {
     '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
   );
 
-  // Blockquote (gabungkan baris berurutan)
+  // Blockquote (gabung baris berurutan)
   s = s.replace(/((?:^(?:&gt;|>)\s?.*(?:\n|$))+)/gm, (block) => {
     const inner = block
       .trimEnd()
@@ -69,7 +67,7 @@ function mdToHtml(src: string) {
     return `\n\n<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-300">${inner}</blockquote>\n\n`;
   });
 
-  // Paragraphs + single line breaks
+  // Paragraf & enter tunggal
   const parts = s.split(/\n{2,}/).map((seg) => {
     const t = seg.trim();
     if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(t)) return t;
@@ -85,7 +83,7 @@ export default function WriteChapterClient() {
   const params = useSearchParams();
   const novelId = params.get("novel_id");
 
-  // form (samakan pola dgn edit: { title, content })
+  // form (selaras dgn Edit)
   const [number, setNumber] = useState<number | "">("");
   const [form, setForm] = useState({ title: "", content: "" });
 
@@ -104,7 +102,7 @@ export default function WriteChapterClient() {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
   }, []);
 
-  // load meta novel + nomor berikutnya
+  // load meta + nomor berikutnya
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -114,7 +112,6 @@ export default function WriteChapterClient() {
           setBusyMeta(false);
           return;
         }
-
         const { data: n } = await supabase
           .from("novels")
           .select("id, title, cover_url, tags")
@@ -132,7 +129,6 @@ export default function WriteChapterClient() {
           .limit(1);
 
         if (!alive) return;
-
         if (nums && nums.length && typeof nums[0].number === "number") {
           setNumber((nums[0].number as number) + 1);
         } else {
@@ -191,7 +187,7 @@ export default function WriteChapterClient() {
         novel_id: novelId,
         number: Number(number),
         title: (form.title || "").trim() || null,
-        content: form.content ?? "", // ← isi dari Editor (sama dengan Edit)
+        content: form.content ?? "", // sama seperti Edit
         content_text: plain.slice(0, 4000) || null,
         status: "pending",
         author_id: user.id,
@@ -211,7 +207,7 @@ export default function WriteChapterClient() {
 
   const novelTitle = useMemo(() => novel?.title ?? "(Novel tidak ditemukan)", [novel?.title]);
 
-  /* ===================== Derived untuk Preview ===================== */
+  /* ===================== Preview derived ===================== */
   const raw = String(form.content ?? "");
   const plain = useMemo(() => normalizePlain(raw), [raw]);
   const previewMode: "html" | "md" | "text" = useMemo(() => {
@@ -223,7 +219,6 @@ export default function WriteChapterClient() {
   const previewHTML = useMemo(() => {
     if (previewMode === "html") return raw;
     if (previewMode === "md") return mdToHtml(plain);
-    // text => paragraf
     const blocks = plain
       .replace(/\r\n/g, "\n")
       .trim()
@@ -233,7 +228,7 @@ export default function WriteChapterClient() {
     return blocks || `<p class="opacity-60">Belum ada konten…</p>`;
   }, [previewMode, plain, raw]);
 
-  /* ===================== Loading meta ===================== */
+  /* ===================== Loading awal ===================== */
   if (busyMeta) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-zinc-950 to-zinc-900 text-zinc-100">
@@ -260,7 +255,7 @@ export default function WriteChapterClient() {
   /* ===================== UI ===================== */
   return (
     <div className="min-h-screen bg-gradient-to-b from-zinc-950 to-zinc-900 text-zinc-100">
-      {/* Header ringkas & elegan (sesuai desain write sebelumnya) */}
+      {/* Header */}
       <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
         <div className="mx-auto flex w-[min(980px,94vw)] items-center gap-2 px-3 py-3">
           <button
@@ -337,7 +332,7 @@ export default function WriteChapterClient() {
           </div>
         )}
 
-        {/* Kartu utama: kiri tulis, kanan preview (responsive) */}
+        {/* Kartu utama: kiri tulis, kanan preview */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
           {/* Nomor & Judul */}
           <div className="grid gap-3 sm:grid-cols-[140px,1fr]">
@@ -387,22 +382,26 @@ export default function WriteChapterClient() {
             </button>
           </div>
 
-          {/* Grid 2 kolom untuk ≥lg: editor kiri, preview kanan */}
+          {/* Grid 2 kolom untuk ≥lg */}
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            {/* Kolom Editor (selalu tampil; di mobile disembunyikan saat tab Preview) */}
+            {/* Kolom Editor — dibungkus .hide-editor-extras untuk menyembunyikan toolbar & preview bawaan */}
             <div className={activeTab === "preview" ? "hidden lg:block" : "block"}>
               <label className="mb-1 block text-xs text-zinc-400">Isi Bab</label>
-              <Editor value={form.content} setValue={(v) => setForm({ ...form, content: v })} />
-              <div className="mt-2 text-xs text-zinc-400">
-                Gunakan toolbar untuk format dasar. Dukungan *teks*, _teks_, ~teks~, `kode`, &gt; kutipan, dan heading.
+
+              <div className="hide-editor-extras">
+                <Editor value={form.content} setValue={(v) => setForm({ ...form, content: v })} />
               </div>
+
+              {/* (Opsional) catatan singkat */}
+              {/* <div className="mt-2 text-xs text-zinc-400">
+                Format cepat: *tebal*, _miring_, ~coret~, `kode`, awali baris dengan &gt; untuk kutipan.
+              </div> */}
             </div>
 
             {/* Kolom Preview */}
             <div className={activeTab === "write" ? "hidden lg:block" : "block"}>
               <label className="mb-1 block text-xs text-zinc-400">Pratinjau</label>
               <div className="rounded-xl border border-white/10 bg-zinc-950/60 p-4">
-                {/* Judul pratinjau */}
                 <div className="mb-3">
                   <div className="text-lg font-bold text-indigo-300">
                     {form.title?.trim() || (typeof number === "number" ? `Bab ${number}` : "Judul Bab")}
@@ -410,7 +409,6 @@ export default function WriteChapterClient() {
                   <div className="mt-1 text-xs text-zinc-400">{novelTitle}</div>
                 </div>
 
-                {/* Isi pratinjau */}
                 <div
                   className="prose prose-invert max-w-none"
                   dangerouslySetInnerHTML={{ __html: previewHTML }}
@@ -472,6 +470,46 @@ export default function WriteChapterClient() {
           </div>
         </div>
       </div>
+
+      {/* ===== CSS override untuk menyembunyikan toolbar + preview bawaan Editor ===== */}
+      <style jsx global>{`
+        /* Bungkus Editor dengan .hide-editor-extras agar aman dan hanya mempengaruhi halaman ini */
+        .hide-editor-extras .editor-toolbar,
+        .hide-editor-extras [data-editor-toolbar],
+        .hide-editor-extras .md-toolbar,
+        .hide-editor-extras .ProseMirror-menubar,
+        .hide-editor-extras .ql-toolbar,
+        .hide-editor-extras .toolbar,
+        .hide-editor-extras .tools,
+        .hide-editor-extras .rich-toolbar {
+          display: none !important;
+        }
+
+        /* Sembunyikan label/section "Preview" internal milik komponen Editor (jika ada) */
+        .hide-editor-extras .editor-preview-label,
+        .hide-editor-extras [data-preview-label],
+        .hide-editor-extras .preview-label {
+          display: none !important;
+        }
+
+        /* Beberapa editor menaruh label heading kecil sebelum box preview */
+        .hide-editor-extras h6 + .preview,
+        .hide-editor-extras h6 + [data-preview],
+        .hide-editor-extras h6 + .editor-preview {
+          display: none !important;
+        }
+        .hide-editor-extras h6 + .preview,
+        .hide-editor-extras h6 {
+          /* jika heading khusus untuk preview: sembunyikan juga labelnya */
+        }
+
+        /* Jika editor memakai container generik untuk preview internal */
+        .hide-editor-extras .editor-preview,
+        .hide-editor-extras [data-preview],
+        .hide-editor-extras .md-preview {
+          display: none !important;
+        }
+      `}</style>
     </div>
   );
 }
