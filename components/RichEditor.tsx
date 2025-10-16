@@ -136,7 +136,7 @@ export default function Editor({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm h-56"
-        placeholder="Tulis konten bab di sini... (Markdown: #, ##, ###, **bold**, *italic*, ![alt](url))"
+        placeholder="Ayo halu disini..."
       />
 
       {/* Preview */}
