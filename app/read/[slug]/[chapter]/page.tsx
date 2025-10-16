@@ -46,7 +46,7 @@ function normalizePlain(s: string) {
 function mdToHtml(src: string) {
   if (!src) return "";
 
-  // Escape dasar
+  // Escape dasar & normalisasi newline
   let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   s = s.replace(/\r\n/g, "\n");
 
@@ -75,33 +75,36 @@ function mdToHtml(src: string) {
     '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
   );
 
-  // ── Blockquote yang toleran spasi kiri ──
-  // - Izinkan spasi sebelum '>'
-  // - Gabungkan beberapa baris quote jadi satu <blockquote> (pakai <br/> di dalam)
-  // - Sisipkan newline kosong sebelum & sesudah agar “enter” sekitar kutipan tidak hilang
+  // Blockquote toleran spasi di kiri; gabungkan beberapa baris quote menjadi satu <blockquote>
   s = s.replace(
     /((?:^\s*(?:&gt;|>)\s?.*(?:\n|$))+)/gm,
     (block) => {
       const inner = block
         .trimEnd()
         .split("\n")
-        .map(l => l.replace(/^\s*(?:&gt;|>)\s?/, "")) // buang marker '>'
+        .map(l => l.replace(/^\s*(?:&gt;|>)\s?/, "")) // buang marker >
         .join("<br />");
-      return `\n\n<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">${inner}</blockquote>\n\n`;
+      return `\n<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">${inner}</blockquote>\n`;
     }
   );
 
-  // ── Paragraf & enter ──
-  const parts = s.split(/\n{2,}/).map(seg => {
-    const t = seg.trim();
-    // Jangan bungkus elemen blok ke dalam <p>
-    if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(t)) return t;
-    // Enter tunggal => <br/>
-    return `<p>${t.replace(/\n/g, "<br />")}</p>`;
-  });
+  // — PARAGRAF (WA-style): SATU newline = paragraf baru —
+  // 1) Pecah semua berdasarkan satu atau lebih newline
+  // 2) Abaikan segmen kosong
+  // 3) Kalau segmen sudah berupa elemen blok (h1/h2/h3/blockquote/pre/img) biarkan apa adanya
+  // 4) Selain itu bungkus ke <p> (tidak ada <br/> lagi karena setiap baris memang dianggap paragraf)
+  const parts = s
+    .split(/\n+/)
+    .map(seg => seg.trim())
+    .filter(Boolean)
+    .map(seg => {
+      if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(seg)) return seg;
+      return `<p>${seg}</p>`;
+    });
 
   return parts.join("");
 }
+
 
 
 
