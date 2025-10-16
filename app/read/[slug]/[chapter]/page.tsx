@@ -43,28 +43,76 @@ function normalizePlain(s: string) {
     .replace(/[\u200B-\u200D\uFEFF]/g, "");
 }
 
-/* ======== >>> mdToHtml: SALIN DARI EDITOR LAMA <<< ======== */
 function mdToHtml(src: string) {
   if (!src) return "";
-  let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // 1) Escape dasar (supaya aman dulu)
+  let s = src
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // 2) Heading
   s = s.replace(/^###\s+(.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
-  s = s.replace(/^##\s+(.+)$/gm, '<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
-  s = s.replace(/^#\s+(.+)$/gm, '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
-  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  s = s.replace(/^##\s+(.+)$/gm,  '<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
+  s = s.replace(/^#\s+(.+)$/gm,   '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
+
+  // 3) Blockquote (dukung '>' yang sudah jadi &gt;)
+  s = s.replace(/^(?:&gt;|>)\s?(.*)$/gm,
+    '<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">$1</blockquote>'
+  );
+
+  // 4) Blok kode ```...``` (jangan di-escape lagi)
+  s = s.replace(/```([\s\S]*?)```/g,
+    (_m, code) =>
+      `<pre class="my-3 rounded-lg border border-white/10 bg-black/30 p-3 overflow-x-auto"><code>${code}</code></pre>`
+  );
+
+  // 5) Inline code
+  s = s.replace(/`([^`]+?)`/g, '<code class="rounded bg-black/30 px-1 py-0.5">$1</code>');
+
+  // 6) WhatsApp-style + kompat lama (**bold**)
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");           // **bold** (konten lama)
+  s = s.replace(/\*(?!\s)([^*]+?)(?<!\s)\*/g, "<strong>$1</strong>"); // *bold*
+  s = s.replace(/_(?!\s)([^_]+?)(?<!\s)_/g, "<em>$1</em>");           // _italic_
+  s = s.replace(/~(?!\s)([^~]+?)(?<!\s)~/g, "<del>$1</del>");         // ~strike~
+
+  // 7) Gambar
   s = s.replace(
     /!\[(.*?)\]\((.*?)\)/g,
     '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
   );
-  s = s.replace(/\n{2,}/g, "</p><p>");
-  return "<p>" + s + "</p>";
-}
-/* ========================================================== */
 
-/** Deteksi Markdown ala editor lamamu */
-function looksLikeEditorMarkdown(s: string) {
-  // deteksi heading (#,##,###), bold **, italic *, image ![alt](url)
-  return /(^|\n)\s*#{1,3}\s+/.test(s) || /\*\*.+?\*\*/.test(s) || /\*.+?\*/.test(s) || /!\[.*?\]\(.*?\)/.test(s);
+  // 8) Paragraf & line break
+  s = s.replace(/\r\n/g, "\n");
+
+  // Bagi per 2+ newline (paragraf). Untuk segmen yang SUDAH elemen blok, biarkan.
+  const parts = s.split(/\n{2,}/).map(seg => {
+    const trimmed = seg.trim();
+    // kalau dia mulai dengan elemen blok, jangan bungkus <p>
+    if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(trimmed)) {
+      return trimmed;
+    }
+    // selain itu, enter tunggal -> <br />
+    const withBr = trimmed.replace(/\n/g, "<br />");
+    return `<p>${withBr}</p>`;
+  });
+
+  return parts.join("");
+}
+
+/** Deteksi pola "WhatsApp-style" agar kita render via mdToHtml */
+function looksLikeWhatsAppMD(s: string) {
+  return (
+    /(^|\n)>\s?/.test(s) ||               // quote
+    /```[\s\S]*?```/.test(s) ||           // code fence
+    /`[^`]+`/.test(s) ||                  // inline code
+    /\*(?!\s)[^*]+?(?<!\s)\*/.test(s) ||  // *bold*
+    /_(?!\s)[^_]+?(?<!\s)_/.test(s) ||    // _italic_
+    /~(?!\s)[^~]+?(?<!\s)~/.test(s) ||    // ~strike~
+    /(^|\n)\s*#{1,3}\s+/.test(s) ||       // headings
+    /!\[.*?\]\(.*?\)/.test(s)             // image
+  );
 }
 
 /** Util kelas tema */
@@ -198,13 +246,13 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
   /** Mode render:
    * - "html": memang HTML
-   * - "md-old": markdown ala Editor lama (mdToHtml)
+   * - "md-old": markdown WhatsApp-style (mdToHtml)
    * - "text": fallback paragraf biasa
    */
   const mode: "html" | "md-old" | "text" = useMemo(() => {
     if (!plain.trim()) return "text";
     if (looksLikeHTML(raw)) return "html";
-    return looksLikeEditorMarkdown(plain) ? "md-old" : "text";
+    return looksLikeWhatsAppMD(plain) ? "md-old" : "text";
   }, [raw, plain]);
 
   const sanitizedHTML = useMemo(
@@ -397,7 +445,6 @@ export default function ReaderPage({ params }: ReaderPageProps) {
               {mode === "md-old" && (
                 <div
                   className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
-                  // mdToHtml sudah escape tag, jadi aman; tetap lewati DOMPurify agar konsisten
                   dangerouslySetInnerHTML={{ __html: mdToHtml(plain) }}
                 />
               )}
