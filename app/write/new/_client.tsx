@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import Editor from "@/components/RichEditor";
 import {
   Loader2,
   ArrowLeft,
@@ -19,13 +18,118 @@ import {
 type Msg = { type: "success" | "error" | "info"; text: string };
 type NovelLite = { id: string; title: string; cover_url: string | null; tags: string[] | null };
 
-/* ───────────────── Page ───────────────── */
+/* ───────────────── Mini Markdown → HTML (preview) ───────────────── */
+function mdToHtml(src: string) {
+  if (!src) return "";
+  // escape
+  let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // headings
+  s = s.replace(/^###\s+(.+)$/gm, '<h3 class="mt-3 mb-1 text-base font-semibold">$1</h3>');
+  s = s.replace(/^##\s+(.+)$/gm, '<h2 class="mt-4 mb-2 text-lg font-bold">$1</h2>');
+  s = s.replace(/^#\s+(.+)$/gm, '<h1 class="mt-5 mb-3 text-xl font-extrabold">$1</h1>');
+  // bold & italic
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // link & image sederhana
+  s = s.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" class="my-3 max-w-full rounded border border-white/10" />');
+  s = s.replace(/\[([^\]]+)\]\((.*?)\)/g, '<a href="$2" class="text-sky-400 underline" target="_blank" rel="noopener noreferrer">$1</a>');
+  // paragraphs
+  s = s.replace(/\r\n/g, "\n").split(/\n{2,}/).map(p => `<p class="leading-7">${p.replace(/\n/g,"<br>")}</p>`).join("");
+  return s;
+}
+
+/* ───────────────── Editor Lokal (toolbar di bawah) ───────────────── */
+function ToolbarButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const { children, className = "", ...rest } = props;
+  return (
+    <button
+      type="button"
+      {...rest}
+      className={`rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs hover:bg-white/10 ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function LocalEditor({
+  value,
+  setValue,
+  placeholder,
+}: {
+  value: string;
+  setValue: (v: string) => void;
+  placeholder?: string;
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  const wrap = (before: string, after = before) => {
+    const el = taRef.current;
+    if (!el) return;
+    const { selectionStart: s, selectionEnd: e } = el;
+    const v = el.value;
+    const selected = v.slice(s, e);
+    const out = v.slice(0, s) + before + selected + after + v.slice(e);
+    setValue(out);
+    // restore caret
+    requestAnimationFrame(() => {
+      el.focus();
+      el.selectionStart = s + before.length;
+      el.selectionEnd = e + before.length;
+    });
+  };
+
+  const insertHeading = (level: 1 | 2 | 3) => {
+    const hashes = "#".repeat(level) + " ";
+    wrap("\n" + hashes, "");
+  };
+
+  const insertImage = () => {
+    const url = prompt("Masukkan URL gambar:");
+    if (!url) return;
+    setValue((value || "") + `\n![alt](${url})\n`);
+  };
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-3">
+      {/* Textarea */}
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={placeholder || "Tulis konten bab di sini… (Markdown: #, ##, ###, **bold**, *italic*, [alt](url))"}
+        className="h-56 w-full resize-vertical rounded-lg border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+      />
+
+      {/* Toolbar di BAWAH textarea */}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <ToolbarButton onClick={() => insertHeading(1)}>H1</ToolbarButton>
+        <ToolbarButton onClick={() => insertHeading(2)}>H2</ToolbarButton>
+        <ToolbarButton onClick={() => insertHeading(3)}>H3</ToolbarButton>
+        <ToolbarButton onClick={() => wrap("**")}>Bold</ToolbarButton>
+        <ToolbarButton onClick={() => wrap("*")}>Italic</ToolbarButton>
+        <ToolbarButton onClick={insertImage}>Insert img</ToolbarButton>
+      </div>
+
+      {/* Preview ringkas */}
+      <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+        <div className="mb-1 text-xs text-zinc-400">Preview</div>
+        <div
+          className="prose prose-invert max-w-none text-sm"
+          dangerouslySetInnerHTML={{ __html: mdToHtml(value) }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────── Halaman Write ───────────────── */
 export default function WriteChapterClient() {
   const router = useRouter();
   const params = useSearchParams();
   const novelId = params.get("novel_id");
 
-  // form (logika persis seperti yang sudah benar)
+  // form (logika tetap)
   const [number, setNumber] = useState<number | "">("");
   const [form, setForm] = useState({ title: "", content: "" });
 
@@ -67,11 +171,7 @@ export default function WriteChapterClient() {
           .limit(1);
 
         if (!alive) return;
-        if (nums && nums.length && typeof nums[0].number === "number") {
-          setNumber((nums[0].number as number) + 1);
-        } else {
-          setNumber(1);
-        }
+        setNumber(nums && nums.length && typeof nums[0].number === "number" ? (nums[0].number as number) + 1 : 1);
       } catch (e: any) {
         setMsg({ type: "error", text: e?.message || "Gagal memuat metadata novel." });
         if (number === "") setNumber(1);
@@ -102,6 +202,7 @@ export default function WriteChapterClient() {
       return;
     }
 
+    // simpan teks polos untuk pencarian/moderasi
     const plain = (form.content || "").replace(/<[^>]+>/g, "").trim();
     if (plain.length < 20) {
       setMsg({ type: "error", text: "Konten terlalu pendek (min. ±20 karakter)." });
@@ -110,10 +211,7 @@ export default function WriteChapterClient() {
 
     setSubmitting(true);
     try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
       if (userErr) throw userErr;
       if (!user) throw new Error("Kamu belum login.");
 
@@ -124,7 +222,7 @@ export default function WriteChapterClient() {
         novel_id: novelId,
         number: Number(number),
         title: (form.title || "").trim() || null,
-        content: form.content || null,      // simpan apa adanya
+        content: form.content || null,          // MD/HTML ringan
         content_text: plain.slice(0, 4000) || null,
         status: "pending",
         author_id: user.id,
@@ -168,7 +266,7 @@ export default function WriteChapterClient() {
     );
   }
 
-  /* ─────────── UI Minimalis (sesuai screenshot) ─────────── */
+  /* ─────────── UI Minimalis (toolbar di bawah) ─────────── */
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       {/* Header */}
@@ -212,7 +310,7 @@ export default function WriteChapterClient() {
           </div>
         </div>
 
-        {/* Meta novel (kecil) */}
+        {/* Meta novel */}
         {novelId && (
           <div className="mb-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.035] p-3">
             {novel?.cover_url ? (
@@ -239,7 +337,7 @@ export default function WriteChapterClient() {
           </div>
         )}
 
-        {/* Kartu utama (layout minimalis, editor di bawah field) */}
+        {/* Kartu utama */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
           <div className="grid gap-3 sm:grid-cols-[160px,1fr]">
             <div>
@@ -265,18 +363,19 @@ export default function WriteChapterClient() {
             </div>
           </div>
 
-          {/* Editor berada DI BAWAH form — tidak mengubah component Editor sama sekali */}
+          {/* Editor — toolbar DI BAWAH */}
           <div className="mt-4">
             <label className="mb-1 block text-sm text-zinc-300">Isi Bab</label>
-            <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-3">
-              <Editor value={form.content} setValue={(v) => setForm({ ...form, content: v })} />
-            </div>
+            <LocalEditor
+              value={form.content}
+              setValue={(v) => setForm({ ...form, content: v })}
+              placeholder="Tulis konten bab di sini… (Markdown: #, ##, ###, **bold**, *italic*, [alt](url))"
+            />
             <div className="mt-2 text-xs text-zinc-500">
               Gunakan toolbar untuk format dasar (bold, italic, heading, list, link). Konten disimpan dalam HTML ringan.
             </div>
           </div>
 
-          {/* Pesan status */}
           {msg && (
             <div
               className={[
@@ -305,7 +404,7 @@ export default function WriteChapterClient() {
 
       {/* Bottom bar */}
       <div className="sticky bottom-0 z-40 border-t border-white/10 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto flex w-[min(1100px,96vw)] items-center justify-between gap-3 px-3 py-3">
+        <div className="mx-auto flex w=[min(1100px,96vw)] items-center justify-between gap-3 px-3 py-3">
           <div className="text-xs text-zinc-400">
             Menulis: <span className="text-zinc-300">{novelTitle}</span>
             {typeof number === "number" ? <> • Bab {number}</> : null}
