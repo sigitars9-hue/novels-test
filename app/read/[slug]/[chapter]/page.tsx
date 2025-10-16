@@ -46,60 +46,62 @@ function normalizePlain(s: string) {
 function mdToHtml(src: string) {
   if (!src) return "";
 
-  // 1) Escape dasar (supaya aman dulu)
-  let s = src
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  // Escape dasar
+  let s = src.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  s = s.replace(/\r\n/g, "\n");
 
-  // 2) Heading
-  s = s.replace(/^###\s+(.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
-  s = s.replace(/^##\s+(.+)$/gm,  '<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
-  s = s.replace(/^#\s+(.+)$/gm,   '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
+  // Heading
+  s = s.replace(/^###\s+(.+)$/gm,'<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
+  s = s.replace(/^##\s+(.+)$/gm,'<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
+  s = s.replace(/^#\s+(.+)$/gm,'<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
 
-  // 3) Blockquote (dukung '>' yang sudah jadi &gt;)
-  s = s.replace(/^(?:&gt;|>)\s?(.*)$/gm,
-    '<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">$1</blockquote>'
-  );
-
-  // 4) Blok kode ```...``` (jangan di-escape lagi)
+  // Block code ```
   s = s.replace(/```([\s\S]*?)```/g,
     (_m, code) =>
       `<pre class="my-3 rounded-lg border border-white/10 bg-black/30 p-3 overflow-x-auto"><code>${code}</code></pre>`
   );
 
-  // 5) Inline code
+  // Inline code
   s = s.replace(/`([^`]+?)`/g, '<code class="rounded bg-black/30 px-1 py-0.5">$1</code>');
 
-  // 6) WhatsApp-style + kompat lama (**bold**)
-  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");           // **bold** (konten lama)
+  // WhatsApp-style + kompat lama
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");             // **bold**
   s = s.replace(/\*(?!\s)([^*]+?)(?<!\s)\*/g, "<strong>$1</strong>"); // *bold*
   s = s.replace(/_(?!\s)([^_]+?)(?<!\s)_/g, "<em>$1</em>");           // _italic_
   s = s.replace(/~(?!\s)([^~]+?)(?<!\s)~/g, "<del>$1</del>");         // ~strike~
 
-  // 7) Gambar
-  s = s.replace(
-    /!\[(.*?)\]\((.*?)\)/g,
+  // Gambar
+  s = s.replace(/!\[(.*?)\]\((.*?)\)/g,
     '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
   );
 
-  // 8) Paragraf & line break
-  s = s.replace(/\r\n/g, "\n");
-
-  // Bagi per 2+ newline (paragraf). Untuk segmen yang SUDAH elemen blok, biarkan.
-  const parts = s.split(/\n{2,}/).map(seg => {
-    const trimmed = seg.trim();
-    // kalau dia mulai dengan elemen blok, jangan bungkus <p>
-    if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(trimmed)) {
-      return trimmed;
+  // ── Blockquote ──
+  // Tambahkan baris kosong di SEBELUM & SESUDAH agar enter “terbaca”.
+  // Juga gabungkan baris blockquote yang berurutan jadi satu <blockquote> dengan <br /> di dalamnya.
+  s = s.replace(
+    /((?:^(?:&gt;|>)\s?.*(?:\n|$))+)/gm,
+    (block) => {
+      const inner = block
+        .trimEnd()
+        .split("\n")
+        .map(l => l.replace(/^(?:&gt;|>)\s?/, "")) // buang marker >
+        .join("<br />");
+      return `\n\n<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">${inner}</blockquote>\n\n`;
     }
-    // selain itu, enter tunggal -> <br />
-    const withBr = trimmed.replace(/\n/g, "<br />");
-    return `<p>${withBr}</p>`;
+  );
+
+  // ── Paragraf & enter ──
+  const parts = s.split(/\n{2,}/).map(seg => {
+    const t = seg.trim();
+    // Jika sudah elemen blok, jangan bungkus <p>
+    if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(t)) return t;
+    // Enter tunggal -> <br />
+    return `<p>${t.replace(/\n/g, "<br />")}</p>`;
   });
 
   return parts.join("");
 }
+
 
 /** Deteksi pola "WhatsApp-style" agar kita render via mdToHtml */
 function looksLikeWhatsAppMD(s: string) {
