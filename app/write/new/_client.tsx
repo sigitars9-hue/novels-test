@@ -41,7 +41,7 @@ export default function WriteChapterClient() {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
   }, []);
 
-  // load meta novel + next number
+  // load meta novel + next number (tanpa ubah logika)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -165,7 +165,7 @@ export default function WriteChapterClient() {
             </div>
           </div>
         </header>
-        <main className="mx-auto w-[min(1000px,96vw)] px-3 py-6">
+        <main className="mx-auto w/[min(1000px,96vw)] px-3 py-6">
           <div className="flex items-center gap-2 text-sm text-zinc-400">
             <Loader2 className="h-4 w-4 animate-spin" /> Memuat…
           </div>
@@ -176,7 +176,7 @@ export default function WriteChapterClient() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* Header minimal */}
+      {/* Header minimal — gaya sebelumnya */}
       <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
         <div className="mx-auto flex w-[min(1000px,96vw)] items-center gap-2 px-3 py-3">
           <button
@@ -195,7 +195,7 @@ export default function WriteChapterClient() {
             <button
               onClick={handleSubmit}
               disabled={submitting || !novelId}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Ajukan
@@ -204,14 +204,14 @@ export default function WriteChapterClient() {
         </div>
       </header>
 
-      {/* Body */}
+      {/* Body — nuansa lama, minimal, editor di bawah meta, preview rapi */}
       <main className="mx-auto w-[min(1100px,96vw)] px-3 py-5">
         {/* Info bar */}
         <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-2">
-            <Info className="h-4 w-4 text-indigo-300" />
+            <Info className="h-4 w-4 text-sky-300" />
             <span>
-              Status awal <span className="font-semibold text-indigo-300">pending</span>. Konten akan ditinjau moderator sebelum tayang.
+              Status awal <span className="font-semibold text-sky-300">pending</span>. Konten akan ditinjau moderator sebelum tayang.
               {userEmail ? <> &nbsp;•&nbsp; Masuk sebagai <span className="text-zinc-300">{userEmail}</span></> : null}
             </span>
           </div>
@@ -258,7 +258,7 @@ export default function WriteChapterClient() {
           </div>
         )}
 
-        {/* Card utama */}
+        {/* Card utama — gaya sebelumnya */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgb(255,255,255,0.02)]">
           {/* Meta form */}
           <div className="grid gap-3 sm:grid-cols-[140px,1fr]">
@@ -270,7 +270,7 @@ export default function WriteChapterClient() {
                 value={number}
                 onChange={(e) => setNumber(e.target.value === "" ? "" : Number(e.target.value))}
                 placeholder="1"
-                className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-600"
+                className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
               />
             </div>
             <div>
@@ -279,22 +279,22 @@ export default function WriteChapterClient() {
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
                 placeholder={typeof number === "number" ? `Mis. Bab ${number}` : "Judul bab"}
-                className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-600"
+                className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
               />
             </div>
           </div>
 
-          {/* Editor + Preview (responsif) */}
+          {/* Editor (di bawah meta) + Preview samping di desktop, bawah di mobile */}
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div>
               <label className="mb-2 block text-xs text-zinc-400">Isi Bab</label>
-              {/* Editor milikmu — tidak diubah. Toolbar-nya tetap di bawah area tulis sesuai komponenmu. */}
+              {/* Editor milikmu — tidak diubah */}
               <Editor value={form.content} setValue={(v) => setForm({ ...form, content: v })} />
             </div>
 
             <div className="md:sticky md:top-20 h-fit">
               <label className="mb-2 block text-xs text-zinc-400">Pratinjau</label>
-              <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4">
+              <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-4">
                 <article
                   className="prose prose-invert max-w-none leading-7"
                   dangerouslySetInnerHTML={{ __html: previewHtml }}
@@ -303,7 +303,7 @@ export default function WriteChapterClient() {
             </div>
           </div>
 
-          {/* Message */}
+          {/* Pesan */}
           {msg && (
             <div
               className={[
@@ -330,7 +330,7 @@ export default function WriteChapterClient() {
         </div>
       </main>
 
-      {/* Bottom action bar */}
+      {/* Bottom action bar — gaya sebelumnya (aksen sky) */}
       <div className="sticky bottom-0 z-40 border-t border-white/10 bg-zinc-950/80 backdrop-blur">
         <div className="mx-auto flex w-[min(1100px,96vw)] items-center justify-between gap-3 px-3 py-3">
           <div className="text-xs text-zinc-400">
@@ -348,7 +348,7 @@ export default function WriteChapterClient() {
             <button
               onClick={handleSubmit}
               disabled={submitting || !novelId}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Ajukan Bab
