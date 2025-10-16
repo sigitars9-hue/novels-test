@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import Editor from "@/components/RichEditor";
+import Editor, { mdToHtml } from "@/components/RichEditor";
 import {
   Loader2,
   ArrowLeft,
@@ -15,11 +15,11 @@ import {
   BookOpen,
 } from "lucide-react";
 
-/* ───────────────── Types ───────────────── */
+/* ─────────────── Types ─────────────── */
 type Msg = { type: "success" | "error" | "info"; text: string };
 type NovelLite = { id: string; title: string; cover_url: string | null; tags: string[] | null };
 
-/* ───────────────── Page ───────────────── */
+/* ─────────────── Page ─────────────── */
 export default function WriteChapterClient() {
   const router = useRouter();
   const params = useSearchParams();
@@ -41,7 +41,7 @@ export default function WriteChapterClient() {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
   }, []);
 
-  // load meta novel + next number (mirip sebelumnya, tapi rapikan state)
+  // load meta novel + next number
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -106,7 +106,7 @@ export default function WriteChapterClient() {
       return;
     }
 
-    const plain = (form.content || "").replace(/<[^>]+>/g, "").trim(); // jaga2 jika ada tag
+    const plain = (form.content || "").replace(/<[^>]+>/g, "").trim();
     if (plain.length < 20) {
       setMsg({ type: "error", text: "Konten terlalu pendek (min. ±20 karakter)." });
       return;
@@ -121,7 +121,6 @@ export default function WriteChapterClient() {
       if (userErr) throw userErr;
       if (!user) throw new Error("Kamu belum login.");
 
-      // pastikan profil ada (sama seperti sebelumnya)
       const { error: rpcErr } = await supabase.rpc("ensure_profile");
       if (rpcErr) throw new Error(rpcErr.message || "Gagal memastikan profil.");
 
@@ -148,6 +147,7 @@ export default function WriteChapterClient() {
   }
 
   const novelTitle = useMemo(() => novel?.title ?? "(Novel tidak ditemukan)", [novel?.title]);
+  const previewHtml = useMemo(() => mdToHtml(form.content || ""), [form.content]);
 
   /* ─────────────── Loading awal ─────────────── */
   if (busyMeta) {
@@ -193,7 +193,6 @@ export default function WriteChapterClient() {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            {/* (Opsional) Tambah tombol pratinjau jika kamu punya route preview */}
             <button
               onClick={handleSubmit}
               disabled={submitting || !novelId}
@@ -208,7 +207,6 @@ export default function WriteChapterClient() {
 
       {/* Badges/alerts ala edit */}
       <main className="mx-auto w-[min(1000px,96vw)] px-3 py-5">
-        {/* Info bar seperti edit */}
         <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-sky-300" />
@@ -259,8 +257,9 @@ export default function WriteChapterClient() {
           </div>
         )}
 
-        {/* Card utama — samakan feel dengan edit */}
+        {/* Card utama — 3 kolom nyaman: Preview | Editor | Simulasi Baca */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgb(255,255,255,0.02)]">
+          {/* Meta atas (judul & nomor) */}
           <div className="grid gap-3 sm:grid-cols-[140px,1fr]">
             <div>
               <label className="mb-1 block text-xs text-zinc-400">Nomor Bab</label>
@@ -284,14 +283,34 @@ export default function WriteChapterClient() {
             </div>
           </div>
 
-          <div className="mt-4">
-            <label className="mb-1 block text-xs text-zinc-400">Konten</label>
-            {/* Pakai Editor yang sama dengan edit */}
-            <Editor
-              value={form.content}
-              setValue={(v) => setForm({ ...form, content: v })}
-            />
-          </div>
+          {/* 3 kolom */}
+          <section className="mt-4 grid gap-4 lg:grid-cols-3">
+            {/* Kiri: Preview cepat (markdown → html) */}
+            <div className="rounded-xl border border-white/10 bg-zinc-900/60 p-3 lg:sticky lg:top-[88px] max-lg:order-2 max-h-[70vh] overflow-auto">
+              <div className="mb-2 text-xs text-zinc-400">Preview</div>
+              <div
+                className="prose prose-invert max-w-none"
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            </div>
+
+            {/* Tengah: Editor (posisi utama) */}
+            <div className="rounded-xl border border-white/10 bg-zinc-900/60 p-3 max-lg:order-1">
+              <Editor
+                value={form.content}
+                setValue={(v) => setForm({ ...form, content: v })}
+              />
+            </div>
+
+            {/* Kanan: Simulasi tampilan baca (lebih lapang) */}
+            <div className="rounded-xl border border-white/10 bg-zinc-900/60 p-3 lg:sticky lg:top-[88px] max-lg:order-3 max-h-[70vh] overflow-auto">
+              <div className="mb-2 text-xs text-zinc-400">Simulasi Tampilan Baca</div>
+              <article
+                className="prose prose-invert max-w-none leading-8"
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            </div>
+          </section>
 
           {msg && (
             <div
