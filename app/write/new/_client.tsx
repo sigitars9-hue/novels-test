@@ -1,466 +1,279 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import BottomBar from "@/components/BottomBar";
-import {
-  Loader2,
-  Send,
-  Info,
-  CheckCircle2,
-  AlertTriangle,
-  Type,
-  Bold,
-  Italic,
-  Underline,
-  List,
-  ListOrdered,
-  Link as LinkIcon,
-  BookOpen,
-} from "lucide-react";
+import Editor from "@/components/RichEditor";
+import { Loader2, ArrowLeft, Save, Eye, Trash2 } from "lucide-react";
 
-/* ─────────────── Toolbar ─────────────── */
-function EditorToolbar({
-  exec,
-  dense = false,
-}: {
-  exec: (cmd: string, val?: string) => void;
-  dense?: boolean;
-}) {
-  const pad = dense ? "px-2 py-1" : "px-2.5 py-1.5";
-  return (
-    <div
-      className="
-        flex items-center gap-1 rounded-xl border border-white/10
-        bg-zinc-900/85 backdrop-blur shadow-sm
-      "
-    >
-      <button type="button" onClick={() => exec("bold")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Bold">
-        <Bold className="h-4 w-4" />
-      </button>
-      <button type="button" onClick={() => exec("italic")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Italic">
-        <Italic className="h-4 w-4" />
-      </button>
-      <button type="button" onClick={() => exec("underline")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Underline">
-        <Underline className="h-4 w-4" />
-      </button>
-
-      <span className="mx-1 h-5 w-px bg-white/10" />
-
-      <button
-        type="button"
-        onClick={() => exec("formatBlock", "<h2>")}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Heading"
-      >
-        <Type className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={() => exec("insertUnorderedList")}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Bullet List"
-      >
-        <List className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={() => exec("insertOrderedList")}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Numbered List"
-      >
-        <ListOrdered className="h-4 w-4" />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => {
-          const url = prompt("Masukkan URL:");
-          if (url) exec("createLink", url);
-        }}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Insert Link"
-      >
-        <LinkIcon className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
-
-/* ─────────────── Editor ─────────────── */
-function RichEditor({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (html: string) => void;
-  placeholder?: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [focused, setFocused] = useState(false);
-
-  const exec = (cmd: string, val?: string) => {
-    document.execCommand(cmd, false, val);
-    if (ref.current) onChange(ref.current.innerHTML);
-  };
-
-  // sinkronisasi value dari luar
-  useEffect(() => {
-    if (ref.current && ref.current.innerHTML !== value) {
-      ref.current.innerHTML = value || "";
-    }
-  }, [value]);
-
-  // paste handler — bersihkan style/handler, jaga baris baru
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const onPaste = (e: ClipboardEvent) => {
-      if (!e.clipboardData) return;
-      const html = e.clipboardData.getData("text/html");
-      const text = e.clipboardData.getData("text/plain");
-
-      // Kalau ada HTML, sanitize ringan; kalau tidak, pakai plain text dengan <br>
-      if (html) {
-        e.preventDefault();
-        // buang style & on* attribute
-        let clean = html
-          .replace(/\sstyle=["'][^"']*["']/gi, "")
-          .replace(/\s(on\w+)=["'][^"']*["']/gi, "");
-        // biarkan <p>, <br>, <ul>, <ol>, <li>, <b><i><u><a>
-        // (yang lain biarkan juga—akan di-normalize saat read)
-        document.execCommand("insertHTML", false, clean);
-      } else if (text) {
-        e.preventDefault();
-        const safe = text
-          .split(/\r?\n/)
-          .map((ln) => ln.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
-          .join("<br>");
-        document.execCommand("insertHTML", false, safe);
-      }
-      // update value
-      if (ref.current) onChange(ref.current.innerHTML);
-    };
-
-    el.addEventListener("paste", onPaste as any);
-    return () => el.removeEventListener("paste", onPaste as any);
-  }, [onChange]);
-
-  return (
-    <div className="space-y-2">
-      {/* Kolom isi bab */}
-      <div
-        ref={ref}
-        contentEditable
-        onInput={() => ref.current && onChange(ref.current.innerHTML)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        data-placeholder={placeholder || "Tulis di sini..."}
-        className="
-          min-h-[260px] w-full rounded-xl border border-white/10 bg-zinc-900
-          px-3 py-3 outline-none ring-1 ring-transparent transition focus:ring-sky-500
-          prose prose-invert max-w-none
-          empty:before:text-zinc-500/70 empty:before:content-[attr(data-placeholder)]
-        "
-        style={{
-          wordBreak: "break-word",
-          // ekstra ruang bawah saat fokus (menghindari toolbar/popup menutup area tulis)
-          paddingBottom: focused ? "5.5rem" : undefined,
-          // beri sedikit scroll-margin supaya caret tak mepet tepi
-          scrollMarginBottom: "6rem",
-        }}
-      />
-
-      {/* Toolbar di bawah kolom */}
-      <div className="pt-1">
-        <EditorToolbar exec={exec} />
-      </div>
-    </div>
-  );
-}
-
-/* ──────────────────────────────────────────────── */
-
-type Msg = { type: "success" | "error" | "info"; text: string };
-type NovelLite = {
+/* ───────────────── Types ───────────────── */
+type Novel = {
   id: string;
+  slug: string;
   title: string;
-  cover_url: string | null;
-  tags: string[] | null;
+  author_id: string;
 };
 
-export default function WriteChapterClient() {
-  const params = useSearchParams();
-  const novelId = params.get("novel_id");
+type Chapter = {
+  id: string;
+  novel_id: string;
+  number: number;
+  title: string;
+  content: string | null;
+  updated_at?: string | null;
+};
 
-  // form
-  const [number, setNumber] = useState<number | "">("");
-  const [chapterTitle, setChapterTitle] = useState("");
-  const [contentHTML, setContentHTML] = useState<string>("");
+/* ───────────────── Page ───────────────── */
+export default function EditChapterPage() {
+  const router = useRouter();
+  const params = useParams(); // { slug, number }
+  const slug = String(params?.slug || "");
+  const number = Number(params?.number);
 
-  // ui
-  const [novel, setNovel] = useState<NovelLite | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [msg, setMsg] = useState<Msg | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [session, setSession] = useState<any>(null);
+  const [novel, setNovel] = useState<Novel | null>(null);
+  const [chapter, setChapter] = useState<Chapter | null>(null);
+  const [form, setForm] = useState({ title: "", content: "" });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedTick, setSavedTick] = useState<number>(0);
 
-  // load user & novel meta
+  // Ambil session (sama seperti halaman Write)
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      if (!novelId) return;
-      const { data } = await supabase
-        .from("novels")
-        .select("id, title, cover_url, tags")
-        .eq("id", novelId)
-        .maybeSingle();
-      setNovel((data as any) || null);
+  const isOwner = useMemo(
+    () => !!(session?.user?.id && novel?.author_id === session.user.id),
+    [session?.user?.id, novel?.author_id]
+  );
 
-      const { data: nums } = await supabase
-        .from("chapters")
-        .select("number")
-        .eq("novel_id", novelId)
-        .order("number", { ascending: false })
-        .limit(1);
-
-      if (nums && nums.length && typeof nums[0].number === "number") {
-        setNumber((nums[0].number as number) + 1);
-      } else setNumber(1);
-    })();
-  }, [novelId]);
-
-  const resetForm = () => {
-    setChapterTitle("");
-    setContentHTML("");
-    if (typeof number === "number") setNumber(number + 1);
-  };
-
-  async function handleSubmit() {
-    setMsg(null);
-
-    if (!novelId) {
-      setMsg({ type: "error", text: "novel_id tidak ditemukan. Buka dari halaman metadata." });
-      return;
-    }
-    if (!number || Number.isNaN(Number(number)) || Number(number) <= 0) {
-      setMsg({ type: "error", text: "Nomor bab wajib diisi dan harus > 0." });
-      return;
-    }
-    const plain = contentHTML.replace(/<[^>]+>/g, "").trim();
-    if (plain.length < 20) {
-      setMsg({ type: "error", text: "Konten terlalu pendek (min. ±20 karakter)." });
-      return;
-    }
-
-    setSubmitting(true);
+  const loadData = useCallback(async () => {
+    if (!slug || !Number.isFinite(number)) return;
+    setLoading(true);
+    setErr(null);
     try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-      if (userErr) throw userErr;
-      if (!user) throw new Error("Kamu belum login.");
+      // Novel by slug
+      const { data: n, error: e1 } = await supabase
+        .from("novels")
+        .select("id, slug, title, author_id")
+        .eq("slug", slug)
+        .single();
+      if (e1) throw e1;
+      setNovel(n as Novel);
 
-      const { error: rpcErr } = await supabase.rpc("ensure_profile");
-      if (rpcErr) throw new Error(rpcErr.message || "Gagal memastikan profil.");
+      // Chapter by (novel_id, number)
+      const { data: c, error: e2 } = await supabase
+        .from("chapters")
+        .select("id, novel_id, number, title, content, updated_at")
+        .eq("novel_id", (n as Novel).id)
+        .eq("number", number)
+        .single();
+      if (e2) throw e2;
 
-      const payload = {
-        novel_id: novelId,
-        number: Number(number),
-        title: chapterTitle.trim() || null,
-        content: contentHTML || null, // HTML disimpan apa adanya (akan dinormalisasi di Read)
-        content_text: plain.slice(0, 4000) || null,
-        status: "pending",
-        author_id: user.id, // untuk RLS & moderasi
-      };
-
-      const { error } = await supabase.from("submission_chapters").insert(payload);
-      if (error) throw new Error(error.message);
-
-      setMsg({
-        type: "success",
-        text: "Bab berhasil diajukan. Menunggu persetujuan admin.",
+      const chap = c as Chapter;
+      setChapter(chap);
+      setForm({
+        title: chap?.title || "",
+        content: chap?.content ?? "",
       });
-      resetForm();
     } catch (e: any) {
-      setMsg({ type: "error", text: e?.message || "Gagal mengajukan bab." });
+      setErr(e?.message || "Gagal memuat data.");
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
+  }, [slug, number]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  async function save() {
+    setErr(null);
+    if (!isOwner) {
+      setErr("Anda bukan author novel ini.");
+      return;
+    }
+    if (!chapter?.id) {
+      setErr("Chapter tidak ditemukan.");
+      return;
+    }
+
+    const titleTrim = (form.title || "").trim();
+    const finalTitle = titleTrim.length > 0 ? titleTrim : `Bab ${number}`;
+    const finalContent = form.content ?? "";
+
+    setBusy(true);
+    const { error } = await supabase
+      .from("chapters")
+      .update({ title: finalTitle, content: finalContent })
+      .eq("id", chapter.id);
+    setBusy(false);
+
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    setSavedTick((t) => t + 1);
+  }
+
+  async function removeChapter() {
+    setErr(null);
+    if (!isOwner || !chapter?.id) return;
+    if (!confirm("Hapus bab ini? Tindakan tidak dapat dibatalkan.")) return;
+
+    setBusy(true);
+    const { error } = await supabase.from("chapters").delete().eq("id", chapter.id);
+    setBusy(false);
+
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    router.push(`/novel/${slug}`);
+  }
+
+  /* ─────────────── UI mirip halaman WRITE: fullscreen, tanpa navbar ─────────────── */
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100">
+        <main className="mx-auto w-[min(900px,95vw)] px-4 py-8">
+          <div className="flex items-center gap-2 text-sm text-zinc-400">
+            <Loader2 className="h-4 w-4 animate-spin" /> Memuat…
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!novel || !chapter) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100">
+        <main className="mx-auto w-[min(900px,95vw)] px-4 py-8">
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+            {err ?? "Data tidak ditemukan."}
+          </div>
+          <div className="mt-4">
+            <Link href="/" className="text-sky-400 hover:underline">
+              ← Kembali ke beranda
+            </Link>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* HERO */}
-      <section className="relative">
-        <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(900px_400px_at_20%_-10%,rgba(125,211,252,.12),transparent),radial-gradient(700px_320px_at_80%_0%,rgba(147,197,253,.12),transparent)]" />
-        <div className="mx-auto w-[min(980px,95vw)] px-4 py-8">
-          <h1 className="text-3xl font-extrabold tracking-tight">
-            Tulis Bab (Pending Approval)
-          </h1>
-          <p className="mt-1 text-sm text-zinc-300/90">
-            Bab akan masuk antrian moderasi.{" "}
-            {userEmail ? `Masuk sebagai ${userEmail}.` : ""}
-          </p>
+      {/* Header minimal ala Write */}
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
+        <div className="mx-auto flex w-[min(1000px,96vw)] items-center gap-2 px-3 py-3">
+          <button
+            onClick={() => router.back()}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+          >
+            <ArrowLeft className="h-4 w-4" /> Kembali
+          </button>
 
-          {novelId ? (
-            <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-zinc-900/60 p-3">
-              {novel?.cover_url ? (
-                <img
-                  src={novel.cover_url}
-                  alt=""
-                  className="h-12 w-9 rounded border border-white/10 object-cover"
-                />
-              ) : (
-                <div className="grid h-12 w-9 place-items-center rounded border border-white/10 bg-white/5 text-[10px] text-zinc-400">
-                  No Cover
-                </div>
-              )}
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">
-                  {novel?.title || "(Novel tidak ditemukan)"}
-                </div>
-                <div className="mt-0.5 flex flex-wrap gap-1">
-                  {(novel?.tags || []).map((t) => (
-                    <span
-                      key={t}
-                      className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div className="ml-auto text-xs text-zinc-400">
-                <BookOpen className="mr-1 inline h-3.5 w-3.5" />
-                ID: {novelId.slice(0, 8)}…
-              </div>
-            </div>
-          ) : (
-            <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
-              novel_id tidak ada. Buka dari halaman metadata novel agar parameter
-              ikut terisi. <Link href="/write" className="underline">Kembali ke metadata</Link>
-            </div>
-          )}
-        </div>
-      </section>
+          <div className="ml-2 truncate text-sm text-zinc-300">
+            Edit Bab {number} • <span className="text-zinc-400">{novel.title}</span>
+          </div>
 
-      {/* FORM */}
-      <main className="mx-auto w-[min(980px,95vw)] px-4 pb-10">
-        <div className="mb-4 rounded-xl border border-white/10 bg-zinc-900/50 p-3 text-sm">
-          <div className="flex items-center gap-2">
-            <Info className="h-4 w-4 text-sky-300" />
-            <span>
-              Status awal <span className="font-semibold text-sky-300">pending</span>.
-              Konten akan ditinjau moderator sebelum tayang.
-            </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Link
+              href={`/read/${slug}/${number}`}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+            >
+              <Eye className="h-4 w-4" /> Pratinjau
+            </Link>
+            <button
+              onClick={save}
+              disabled={!isOwner || busy}
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Simpan
+            </button>
           </div>
         </div>
+      </header>
 
-        {msg && (
-          <div
-            className={[
-              "mb-4 rounded-xl border p-3 text-sm",
-              msg.type === "success"
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                : msg.type === "error"
-                ? "border-red-500/30 bg-red-500/10 text-red-200"
-                : "border-white/10 bg-zinc-900/60",
-            ].join(" ")}
-          >
-            <div className="flex items-center gap-2">
-              {msg.type === "success" ? (
-                <CheckCircle2 className="h-4 w-4" />
-              ) : msg.type === "error" ? (
-                <AlertTriangle className="h-4 w-4" />
-              ) : (
-                <Info className="h-4 w-4" />
-              )}
-              <span>{msg.text}</span>
-            </div>
+      {/* Body editor ala Write */}
+      <main className="mx-auto w-[min(1000px,96vw)] px-3 py-5">
+        {!isOwner && (
+          <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
+            Anda bukan author novel ini, perubahan tidak diizinkan.
           </div>
         )}
 
-        <div className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-[140px,1fr]">
-            <div>
-              <label className="mb-1 block text-sm opacity-80">Nomor Bab</label>
-              <input
-                type="number"
-                min={1}
-                value={number}
-                onChange={(e) =>
-                  setNumber(e.target.value === "" ? "" : Number(e.target.value))
-                }
-                placeholder="1"
-                className="w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 text-sm outline-none ring-1 ring-transparent transition focus:ring-sky-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm opacity-80">
-                Judul Bab (opsional)
-              </label>
-              <input
-                value={chapterTitle}
-                onChange={(e) => setChapterTitle(e.target.value)}
-                placeholder="Contoh: Prolog / Pertemuan Pertama"
-                className="w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 text-sm outline-none ring-1 ring-transparent transition focus:ring-sky-500"
-              />
-            </div>
-          </div>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgb(255,255,255,0.02)]">
+          <label className="mb-1 block text-xs text-zinc-400">Judul Bab</label>
+          <input
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
+            placeholder={`Judul bab (mis. Bab ${number})`}
+            disabled={!isOwner || busy}
+          />
 
-          <div>
-            <label className="mb-1 block text-sm opacity-80">Konten</label>
-            <RichEditor
-              value={contentHTML}
-              onChange={setContentHTML}
-              placeholder="Tulis isi bab di sini…"
-            />
-            <div className="mt-1 text-xs text-zinc-400">
-              Konten disimpan sebagai HTML. Gunakan toolbar untuk format dasar.
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setChapterTitle("");
-              setContentHTML("");
-            }}
-            disabled={submitting}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm hover:bg-white/10 disabled:opacity-60"
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting || !novelId}
-            className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Mengajukan…
-              </>
+          <div className="mt-4">
+            <label className="mb-1 block text-xs text-zinc-400">Konten</label>
+            {isOwner ? (
+              <Editor
+                value={form.content}
+                setValue={(v) => setForm({ ...form, content: v })}
+              />
             ) : (
-              <>
-                <Send className="h-4 w-4" /> Ajukan Bab
-              </>
+              <textarea
+                value={form.content}
+                readOnly
+                className="h-72 w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm"
+                placeholder="Isi bab…"
+              />
             )}
-          </button>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+            <div>
+              {chapter.updated_at && (
+                <>Terakhir diubah: {new Date(chapter.updated_at).toLocaleString()}</>
+              )}
+              {savedTick > 0 && (
+                <span className="ml-3 text-emerald-400">Tersimpan ✓</span>
+              )}
+            </div>
+            {err && <div className="text-red-400">{err}</div>}
+          </div>
         </div>
       </main>
 
-      <BottomBar />
+      {/* Bottom action bar ala Write */}
+      <div className="sticky bottom-0 z-40 border-t border-white/10 bg-zinc-950/80 backdrop-blur">
+        <div className="mx-auto flex w-[min(1000px,96vw)] items-center justify-between gap-3 px-3 py-3">
+          <div className="text-xs text-zinc-400">
+            Mengedit: <span className="text-zinc-300">{novel.title}</span> • Bab {number}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={removeChapter}
+              disabled={!isOwner || busy}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-60"
+            >
+              <Trash2 className="h-4 w-4" /> Hapus
+            </button>
+            <button
+              onClick={save}
+              disabled={!isOwner || busy}
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Simpan Perubahan
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
