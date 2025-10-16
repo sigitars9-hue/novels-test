@@ -43,21 +43,58 @@ function normalizePlain(s: string) {
     .replace(/[\u200B-\u200D\uFEFF]/g, "");
 }
 
+/** Konversi HTML sederhana → plain text sembari mempertahankan newline */
+function htmlToPlainPreserveBreaks(html: string) {
+  if (!html) return "";
+  let s = html.replace(/\r\n/g, "\n");
+
+  // <br> → \n
+  s = s.replace(/<br\s*\/?>/gi, "\n");
+
+  // Block elements → sisipkan newline di awal/akhir supaya paragraf kebaca
+  const blocks = [
+    "p","div","section","article","header","footer","main","aside",
+    "ul","ol","li","pre","blockquote","h1","h2","h3","h4","h5","h6","table","tr"
+  ];
+  for (const t of blocks) {
+    const reOpen  = new RegExp(`<${t}\\b[^>]*>`, "gi");
+    const reClose = new RegExp(`</${t}>`, "gi");
+    s = s.replace(reOpen, "\n");
+    s = s.replace(reClose, "\n");
+  }
+
+  // Buang sisa tag
+  s = s.replace(/<\/?[^>]+>/g, "");
+
+  // Decode entitas minimal & rapikan newline
+  s = s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+
+  s = s.replace(/[ \t]+\n/g, "\n");
+  s = s.replace(/\n{3,}/g, "\n\n");
+  return s.trim();
+}
+
+/** Markdown/WA-style → HTML (escape aman + rule minimalis) */
 function mdToHtml(src: string) {
   if (!src) return "";
 
-  // Escape dasar & normalisasi newline
-  let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Escape dasar dulu
+  let s = src.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   s = s.replace(/\r\n/g, "\n");
 
-  // Heading
-  s = s.replace(/^###\s+(.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
-  s = s.replace(/^##\s+(.+)$/gm, '<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
-  s = s.replace(/^#\s+(.+)$/gm,  '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
+  // Heading #, ##, ###
+  s = s.replace(/^###\s+(.+)$/gm,'<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
+  s = s.replace(/^##\s+(.+)$/gm,'<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
+  s = s.replace(/^#\s+(.+)$/gm,'<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
 
-  // Fenced code ```
-  s = s.replace(/```([\s\S]*?)```/g, (_m, code) =>
-    `<pre class="my-3 rounded-lg border border-white/10 bg-black/30 p-3 overflow-x-auto"><code>${code}</code></pre>`
+  // Code block ``` ```
+  s = s.replace(/```([\s\S]*?)```/g,
+    (_m, code) =>
+      `<pre class="my-3 rounded-lg border border-white/10 bg-black/30 p-3 overflow-x-auto"><code>${code}</code></pre>`
   );
 
   // Inline code
@@ -70,47 +107,37 @@ function mdToHtml(src: string) {
   s = s.replace(/~(?!\s)([^~]+?)(?<!\s)~/g, "<del>$1</del>");         // ~strike~
 
   // Gambar
-  s = s.replace(
-    /!\[(.*?)\]\((.*?)\)/g,
+  s = s.replace(/!\[(.*?)\]\((.*?)\)/g,
     '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
   );
 
-  // Blockquote toleran spasi di kiri; gabungkan beberapa baris quote menjadi satu <blockquote>
+  // Blockquote: gabungkan baris berurutan, simpan <br>, beri margin & border
   s = s.replace(
-    /((?:^\s*(?:&gt;|>)\s?.*(?:\n|$))+)/gm,
+    /((?:^(?:&gt;|>)\s?.*(?:\n|$))+)/gm,
     (block) => {
       const inner = block
         .trimEnd()
         .split("\n")
-        .map(l => l.replace(/^\s*(?:&gt;|>)\s?/, "")) // buang marker >
+        .map(l => l.replace(/^(?:&gt;|>)\s?/, ""))
         .join("<br />");
-      return `\n<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">${inner}</blockquote>\n`;
+      return `\n\n<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">${inner}</blockquote>\n\n`;
     }
   );
 
-  // — PARAGRAF (WA-style): SATU newline = paragraf baru —
-  // 1) Pecah semua berdasarkan satu atau lebih newline
-  // 2) Abaikan segmen kosong
-  // 3) Kalau segmen sudah berupa elemen blok (h1/h2/h3/blockquote/pre/img) biarkan apa adanya
-  // 4) Selain itu bungkus ke <p> (tidak ada <br/> lagi karena setiap baris memang dianggap paragraf)
-  const parts = s
-    .split(/\n+/)
-    .map(seg => seg.trim())
-    .filter(Boolean)
-    .map(seg => {
-      if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(seg)) return seg;
-      return `<p>${seg}</p>`;
-    });
+  // Paragraf & enter
+  const parts = s.split(/\n{2,}/).map(seg => {
+    const t = seg.trim();
+    if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(t)) return t; // sudah blok
+    return `<p>${t.replace(/\n/g, "<br />")}</p>`;
+  });
 
   return parts.join("");
 }
 
-
-
-
+/** Deteksi pola "WhatsApp-style" */
 function looksLikeWhatsAppMD(s: string) {
   return (
-    /(^|\n)\s*>\s?/.test(s) ||            // quote (boleh ada spasi kiri)
+    /(^|\n)>\s?/.test(s) ||               // quote
     /```[\s\S]*?```/.test(s) ||           // code fence
     /`[^`]+`/.test(s) ||                  // inline code
     /\*(?!\s)[^*]+?(?<!\s)\*/.test(s) ||  // *bold*
@@ -120,7 +147,6 @@ function looksLikeWhatsAppMD(s: string) {
     /!\[.*?\]\(.*?\)/.test(s)             // image
   );
 }
-
 
 /** Util kelas tema */
 function themeCls(isLight: boolean, light: string, dark: string) {
@@ -249,27 +275,38 @@ export default function ReaderPage({ params }: ReaderPageProps) {
 
   /* ===== Data turunan ===== */
   const raw = String(chapter?.content ?? "");
-  const plain = useMemo(() => normalizePlain(raw), [raw]);
+  const plainRaw = useMemo(() => normalizePlain(raw), [raw]);
+
+  // Jika konten HTML, konversi ke plain (newline dipertahankan) agar md-parser bisa bekerja
+  const looksHtml = useMemo(() => looksLikeHTML(raw), [raw]);
+  const plainForParsing = useMemo(
+    () => (looksHtml ? htmlToPlainPreserveBreaks(raw) : plainRaw),
+    [looksHtml, raw, plainRaw]
+  );
 
   /** Mode render:
-   * - "html": memang HTML
-   * - "md-old": markdown WhatsApp-style (mdToHtml)
+   * - "html": render HTML apa adanya (disanitasi)
+   * - "md-old": render hasil mdToHtml(plainForParsing)
    * - "text": fallback paragraf biasa
+   *
+   * Catatan: jika HTML tapi plain-nya memuat pola WA/Markdown, kita pilih "md-old"
+   * supaya *bold* / _italic_ / > kutip berfungsi.
    */
   const mode: "html" | "md-old" | "text" = useMemo(() => {
-    if (!plain.trim()) return "text";
-    if (looksLikeHTML(raw)) return "html";
-    return looksLikeWhatsAppMD(plain) ? "md-old" : "text";
-  }, [raw, plain]);
+    if (!plainForParsing.trim()) return "text";
+    if (looksHtml) {
+      return looksLikeWhatsAppMD(plainForParsing) ? "md-old" : "html";
+    }
+    return looksLikeWhatsAppMD(plainForParsing) ? "md-old" : "text";
+  }, [looksHtml, plainForParsing]);
 
   const sanitizedHTML = useMemo(
     () => (mode === "html" ? DOMPurify.sanitize(raw) : ""),
     [mode, raw]
   );
 
-  const words = useMemo(() => {
-    return looksLikeHTML(raw) ? countWords(stripHtml(raw)) : countWords(plain);
-  }, [raw, plain]);
+  // Word count berbasis plain yang sudah rapi (enter terjaga)
+  const words = useMemo(() => countWords(plainForParsing), [plainForParsing]);
   const estMin = Math.max(1, Math.round(words / WPM));
 
   /* ===== Auto-hide on scroll ===== */
@@ -452,13 +489,13 @@ export default function ReaderPage({ params }: ReaderPageProps) {
               {mode === "md-old" && (
                 <div
                   className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
-                  dangerouslySetInnerHTML={{ __html: mdToHtml(plain) }}
+                  dangerouslySetInnerHTML={{ __html: mdToHtml(plainForParsing) }}
                 />
               )}
 
               {mode === "text" && (
                 <div className="max-w-none">
-                  {plain
+                  {plainForParsing
                     .replace(/\r\n/g, "\n")
                     .trim()
                     .split(/\n\s*\n+/)
