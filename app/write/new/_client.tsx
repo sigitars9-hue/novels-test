@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import Editor, { mdToHtml } from "@/components/RichEditor";
 import {
   Loader2,
   ArrowLeft,
@@ -12,22 +11,184 @@ import {
   Info,
   CheckCircle2,
   AlertTriangle,
+  Type,
+  Bold,
+  Italic,
+  Underline,
+  List,
+  ListOrdered,
+  Link as LinkIcon,
   BookOpen,
 } from "lucide-react";
 
-/* ───────────────── Types ───────────────── */
+/* ===================== Types ===================== */
 type Msg = { type: "success" | "error" | "info"; text: string };
 type NovelLite = { id: string; title: string; cover_url: string | null; tags: string[] | null };
 
-/* ───────────────── Page ───────────────── */
+/* ===================== Mini RichEditor (toolbar di bawah) ===================== */
+function EditorToolbar({
+  exec,
+  dense = false,
+}: {
+  exec: (cmd: string, val?: string) => void;
+  dense?: boolean;
+}) {
+  const pad = dense ? "px-2 py-1" : "px-2.5 py-1.5";
+  return (
+    <div
+      className="
+        flex flex-wrap items-center gap-1 rounded-xl border border-white/10
+        bg-zinc-900/80 backdrop-blur shadow-sm
+      "
+    >
+      <button type="button" onClick={() => exec("bold")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Bold">
+        <Bold className="h-4 w-4" />
+      </button>
+      <button type="button" onClick={() => exec("italic")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Italic">
+        <Italic className="h-4 w-4" />
+      </button>
+      <button type="button" onClick={() => exec("underline")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Underline">
+        <Underline className="h-4 w-4" />
+      </button>
+
+      <span className="mx-1 h-5 w-px bg-white/10" />
+
+      <button
+        type="button"
+        onClick={() => exec("formatBlock", "<h2>")}
+        className={`rounded-lg ${pad} hover:bg-white/10`}
+        title="Heading"
+      >
+        <Type className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => exec("insertUnorderedList")}
+        className={`rounded-lg ${pad} hover:bg-white/10`}
+        title="Bullet List"
+      >
+        <List className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => exec("insertOrderedList")}
+        className={`rounded-lg ${pad} hover:bg-white/10`}
+        title="Numbered List"
+      >
+        <ListOrdered className="h-4 w-4" />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          const url = prompt("Masukkan URL:");
+          if (url) exec("createLink", url);
+        }}
+        className={`rounded-lg ${pad} hover:bg-white/10`}
+        title="Insert Link"
+      >
+        <LinkIcon className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function RichEditor({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (html: string) => void;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [focused, setFocused] = useState(false);
+
+  const exec = (cmd: string, val?: string) => {
+    document.execCommand(cmd, false, val);
+    if (ref.current) onChange(ref.current.innerHTML);
+  };
+
+  // sinkronisasi value dari luar
+  useEffect(() => {
+    if (ref.current && ref.current.innerHTML !== value) {
+      ref.current.innerHTML = value || "";
+    }
+  }, [value]);
+
+  // paste handler — bersihkan style/handler, jaga baris baru
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const onPaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      const html = e.clipboardData.getData("text/html");
+      const text = e.clipboardData.getData("text/plain");
+
+      if (html) {
+        e.preventDefault();
+        let clean = html
+          .replace(/\sstyle=["'][^"']*["']/gi, "")
+          .replace(/\s(on\w+)=["'][^"']*["']/gi, "");
+        document.execCommand("insertHTML", false, clean);
+      } else if (text) {
+        e.preventDefault();
+        const safe = text
+          .split(/\r?\n/)
+          .map((ln) => ln.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+          .join("<br>");
+        document.execCommand("insertHTML", false, safe);
+      }
+      if (ref.current) onChange(ref.current.innerHTML);
+    };
+
+    el.addEventListener("paste", onPaste as any);
+    return () => el.removeEventListener("paste", onPaste as any);
+  }, [onChange]);
+
+  return (
+    <div className="space-y-2">
+      {/* Kolom isi bab */}
+      <div
+        ref={ref}
+        contentEditable
+        onInput={() => ref.current && onChange(ref.current.innerHTML)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        data-placeholder={placeholder || "Tulis di sini..."}
+        className="
+          min-h-[280px] w-full rounded-2xl border border-white/10 bg-zinc-950/60
+          px-4 py-3 outline-none ring-1 ring-transparent transition focus:ring-indigo-500/70
+          prose prose-invert max-w-none
+          empty:before:text-zinc-500/70 empty:before:content-[attr(data-placeholder)]
+        "
+        style={{
+          wordBreak: "break-word",
+          paddingBottom: focused ? "5.25rem" : undefined, // ruang saat keyboard/popup muncul
+          scrollMarginBottom: "6rem",
+        }}
+      />
+
+      {/* Toolbar di bawah area tulis */}
+      <div className="pt-1">
+        <EditorToolbar exec={exec} />
+      </div>
+    </div>
+  );
+}
+
+/* ===================== Halaman Write ===================== */
 export default function WriteChapterClient() {
   const router = useRouter();
   const params = useSearchParams();
   const novelId = params.get("novel_id");
 
-  // form (selaras dengan halaman edit)
+  // form
   const [number, setNumber] = useState<number | "">("");
-  const [form, setForm] = useState({ title: "", content: "" });
+  const [title, setTitle] = useState("");
+  const [contentHTML, setContentHTML] = useState<string>("");
 
   // ui/meta
   const [novel, setNovel] = useState<NovelLite | null>(null);
@@ -36,12 +197,12 @@ export default function WriteChapterClient() {
   const [msg, setMsg] = useState<Msg | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
-  // session ringan (untuk menampilkan email)
+  // session ringan
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
   }, []);
 
-  // load meta novel + next number (tanpa ubah logika)
+  // load meta novel + nomor berikutnya
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -89,7 +250,8 @@ export default function WriteChapterClient() {
   }, [novelId]);
 
   const resetForm = () => {
-    setForm({ title: "", content: "" });
+    setTitle("");
+    setContentHTML("");
     if (typeof number === "number") setNumber(number + 1);
   };
 
@@ -105,7 +267,7 @@ export default function WriteChapterClient() {
       return;
     }
 
-    const plain = (form.content || "").replace(/<[^>]+>/g, "").trim();
+    const plain = contentHTML.replace(/<[^>]+>/g, "").trim();
     if (plain.length < 20) {
       setMsg({ type: "error", text: "Konten terlalu pendek (min. ±20 karakter)." });
       return;
@@ -126,8 +288,8 @@ export default function WriteChapterClient() {
       const payload = {
         novel_id: novelId,
         number: Number(number),
-        title: (form.title || "").trim() || null,
-        content: form.content || null,          // simpan apa adanya (MD/HTML ringan)
+        title: title.trim() || null,
+        content: contentHTML || null,
         content_text: plain.slice(0, 4000) || null,
         status: "pending",
         author_id: user.id,
@@ -146,27 +308,24 @@ export default function WriteChapterClient() {
   }
 
   const novelTitle = useMemo(() => novel?.title ?? "(Novel tidak ditemukan)", [novel?.title]);
-  const previewHtml = useMemo(() => mdToHtml(form.content || ""), [form.content]);
 
-  /* ─────────────── Loading awal ─────────────── */
+  /* ===================== Loading meta ===================== */
   if (busyMeta) {
     return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      <div className="min-h-screen bg-gradient-to-b from-zinc-950 to-zinc-900 text-zinc-100">
         <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
-          <div className="mx-auto flex w-[min(1000px,96vw)] items-center gap-2 px-3 py-3">
+          <div className="mx-auto flex w-[min(980px,94vw)] items-center gap-2 px-3 py-3">
             <button
               onClick={() => router.back()}
               className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
             >
               <ArrowLeft className="h-4 w-4" /> Kembali
             </button>
-            <div className="ml-2 truncate text-sm text-zinc-300">
-              Tulis Bab Baru • <span className="text-zinc-400">{novelTitle}</span>
-            </div>
+            <div className="ml-2 truncate text-sm text-zinc-300">Menyiapkan editor…</div>
           </div>
         </header>
-        <main className="mx-auto w/[min(1000px,96vw)] px-3 py-6">
-          <div className="flex items-center gap-2 text-sm text-zinc-400">
+        <main className="mx-auto w-[min(980px,94vw)] px-3 py-8">
+          <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300">
             <Loader2 className="h-4 w-4 animate-spin" /> Memuat…
           </div>
         </main>
@@ -174,11 +333,12 @@ export default function WriteChapterClient() {
     );
   }
 
+  /* ===================== UI ===================== */
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* Header minimal — gaya sebelumnya */}
+    <div className="min-h-screen bg-gradient-to-b from-zinc-950 to-zinc-900 text-zinc-100">
+      {/* Header ringkas & elegan */}
       <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto flex w-[min(1000px,96vw)] items-center gap-2 px-3 py-3">
+        <div className="mx-auto flex w-[min(980px,94vw)] items-center gap-2 px-3 py-3">
           <button
             onClick={() => router.back()}
             className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
@@ -187,7 +347,7 @@ export default function WriteChapterClient() {
           </button>
 
           <div className="ml-2 truncate text-sm text-zinc-300">
-            Tulis Bab Baru {typeof number === "number" ? `#${number}` : ""} •{" "}
+            Tulis Bab {typeof number === "number" ? `#${number}` : ""} •{" "}
             <span className="text-zinc-400">{novelTitle}</span>
           </div>
 
@@ -195,7 +355,7 @@ export default function WriteChapterClient() {
             <button
               onClick={handleSubmit}
               disabled={submitting || !novelId}
-              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Ajukan
@@ -204,28 +364,23 @@ export default function WriteChapterClient() {
         </div>
       </header>
 
-      {/* Body — nuansa lama, minimal, editor di bawah meta, preview rapi */}
-      <main className="mx-auto w-[min(1100px,96vw)] px-3 py-5">
-        {/* Info bar */}
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <Info className="h-4 w-4 text-sky-300" />
+      <main className="mx-auto w-[min(980px,94vw)] px-3 py-6">
+        {/* Info */}
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-sm">
+          <div className="flex items-center gap-2">
+            <Info className="h-4 w-4 text-indigo-300" />
             <span>
-              Status awal <span className="font-semibold text-sky-300">pending</span>. Konten akan ditinjau moderator sebelum tayang.
-              {userEmail ? <> &nbsp;•&nbsp; Masuk sebagai <span className="text-zinc-300">{userEmail}</span></> : null}
+              Status awal <span className="font-semibold text-indigo-300">pending</span>. Konten akan ditinjau moderator sebelum tayang.
+              {userEmail ? <> &nbsp;•&nbsp; Masuk sebagai <span className="text-zinc-200">{userEmail}</span></> : null}
             </span>
           </div>
         </div>
 
-        {/* Meta novel */}
+        {/* Meta Novel */}
         {novelId ? (
           <div className="mb-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.035] p-3">
             {novel?.cover_url ? (
-              <img
-                src={novel.cover_url}
-                alt=""
-                className="h-12 w-9 rounded border border-white/10 object-cover"
-              />
+              <img src={novel.cover_url} alt="" className="h-12 w-9 rounded border border-white/10 object-cover" />
             ) : (
               <div className="grid h-12 w-9 place-items-center rounded border border-white/10 bg-white/5 text-[10px] text-zinc-400">
                 No Cover
@@ -258,9 +413,9 @@ export default function WriteChapterClient() {
           </div>
         )}
 
-        {/* Card utama — gaya sebelumnya */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgb(255,255,255,0.02)]">
-          {/* Meta form */}
+        {/* Kartu utama minimalis */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+          {/* Nomor & Judul */}
           <div className="grid gap-3 sm:grid-cols-[140px,1fr]">
             <div>
               <label className="mb-1 block text-xs text-zinc-400">Nomor Bab</label>
@@ -270,40 +425,30 @@ export default function WriteChapterClient() {
                 value={number}
                 onChange={(e) => setNumber(e.target.value === "" ? "" : Number(e.target.value))}
                 placeholder="1"
-                className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
+                className="w-full rounded-xl border border-white/10 bg-zinc-950/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/70"
               />
             </div>
             <div>
               <label className="mb-1 block text-xs text-zinc-400">Judul Bab (opsional)</label>
               <input
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
                 placeholder={typeof number === "number" ? `Mis. Bab ${number}` : "Judul bab"}
-                className="w-full rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
+                className="w-full rounded-xl border border-white/10 bg-zinc-950/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/70"
               />
             </div>
           </div>
 
-          {/* Editor (di bawah meta) + Preview samping di desktop, bawah di mobile */}
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-2 block text-xs text-zinc-400">Isi Bab</label>
-              {/* Editor milikmu — tidak diubah */}
-              <Editor value={form.content} setValue={(v) => setForm({ ...form, content: v })} />
-            </div>
-
-            <div className="md:sticky md:top-20 h-fit">
-              <label className="mb-2 block text-xs text-zinc-400">Pratinjau</label>
-              <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-4">
-                <article
-                  className="prose prose-invert max-w-none leading-7"
-                  dangerouslySetInnerHTML={{ __html: previewHtml }}
-                />
-              </div>
+          {/* Editor dengan toolbar di bawah */}
+          <div className="mt-4">
+            <label className="mb-1 block text-xs text-zinc-400">Isi Bab</label>
+            <RichEditor value={contentHTML} onChange={setContentHTML} placeholder="Tulis isi bab di sini…" />
+            <div className="mt-2 text-xs text-zinc-400">
+              Gunakan toolbar untuk format dasar (bold, italic, heading, list, link). Konten disimpan dalam HTML ringan.
             </div>
           </div>
 
-          {/* Pesan */}
+          {/* Notif */}
           {msg && (
             <div
               className={[
@@ -330,16 +475,19 @@ export default function WriteChapterClient() {
         </div>
       </main>
 
-      {/* Bottom action bar — gaya sebelumnya (aksen sky) */}
+      {/* Bottom actions */}
       <div className="sticky bottom-0 z-40 border-t border-white/10 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto flex w-[min(1100px,96vw)] items-center justify-between gap-3 px-3 py-3">
+        <div className="mx-auto flex w-[min(980px,94vw)] items-center justify-between gap-3 px-3 py-3">
           <div className="text-xs text-zinc-400">
             Menulis: <span className="text-zinc-300">{novelTitle}</span>
             {typeof number === "number" ? <> • Bab {number}</> : null}
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={resetForm}
+              onClick={() => {
+                setTitle("");
+                setContentHTML("");
+              }}
               disabled={submitting}
               className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-60"
             >
@@ -348,7 +496,7 @@ export default function WriteChapterClient() {
             <button
               onClick={handleSubmit}
               disabled={submitting || !novelId}
-              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold hover:bg-sky-500 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Ajukan Bab
