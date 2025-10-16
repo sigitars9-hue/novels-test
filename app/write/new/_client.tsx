@@ -11,13 +11,6 @@ import {
   Info,
   CheckCircle2,
   AlertTriangle,
-  Type,
-  Bold,
-  Italic,
-  Underline,
-  List,
-  ListOrdered,
-  Link as LinkIcon,
   BookOpen,
 } from "lucide-react";
 
@@ -25,74 +18,7 @@ import {
 type Msg = { type: "success" | "error" | "info"; text: string };
 type NovelLite = { id: string; title: string; cover_url: string | null; tags: string[] | null };
 
-/* ===================== Mini RichEditor (toolbar di bawah) ===================== */
-function EditorToolbar({
-  exec,
-  dense = false,
-}: {
-  exec: (cmd: string, val?: string) => void;
-  dense?: boolean;
-}) {
-  const pad = dense ? "px-2 py-1" : "px-2.5 py-1.5";
-  return (
-    <div
-      className="
-        flex flex-wrap items-center gap-1 rounded-xl border border-white/10
-        bg-zinc-900/80 backdrop-blur shadow-sm
-      "
-    >
-      <button type="button" onClick={() => exec("bold")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Bold">
-        <Bold className="h-4 w-4" />
-      </button>
-      <button type="button" onClick={() => exec("italic")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Italic">
-        <Italic className="h-4 w-4" />
-      </button>
-      <button type="button" onClick={() => exec("underline")} className={`rounded-lg ${pad} hover:bg-white/10`} title="Underline">
-        <Underline className="h-4 w-4" />
-      </button>
-
-      <span className="mx-1 h-5 w-px bg-white/10" />
-
-      <button
-        type="button"
-        onClick={() => exec("formatBlock", "<h2>")}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Heading"
-      >
-        <Type className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={() => exec("insertUnorderedList")}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Bullet List"
-      >
-        <List className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={() => exec("insertOrderedList")}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Numbered List"
-      >
-        <ListOrdered className="h-4 w-4" />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => {
-          const url = prompt("Masukkan URL:");
-          if (url) exec("createLink", url);
-        }}
-        className={`rounded-lg ${pad} hover:bg-white/10`}
-        title="Insert Link"
-      >
-        <LinkIcon className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
-
+/* ===================== Mini RichEditor (tanpa toolbar) ===================== */
 function RichEditor({
   value,
   onChange,
@@ -104,11 +30,6 @@ function RichEditor({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState(false);
-
-  const exec = (cmd: string, val?: string) => {
-    document.execCommand(cmd, false, val);
-    if (ref.current) onChange(ref.current.innerHTML);
-  };
 
   // sinkronisasi value dari luar
   useEffect(() => {
@@ -129,6 +50,7 @@ function RichEditor({
 
       if (html) {
         e.preventDefault();
+        // buang style & on* attribute
         let clean = html
           .replace(/\sstyle=["'][^"']*["']/gi, "")
           .replace(/\s(on\w+)=["'][^"']*["']/gi, "");
@@ -137,7 +59,9 @@ function RichEditor({
         e.preventDefault();
         const safe = text
           .split(/\r?\n/)
-          .map((ln) => ln.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+          .map((ln) =>
+            ln.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          )
           .join("<br>");
         document.execCommand("insertHTML", false, safe);
       }
@@ -166,14 +90,30 @@ function RichEditor({
         "
         style={{
           wordBreak: "break-word",
-          paddingBottom: focused ? "5.25rem" : undefined, // ruang saat keyboard/popup muncul
+          paddingBottom: focused ? "4.5rem" : undefined, // ruang ekstra saat fokus
           scrollMarginBottom: "6rem",
         }}
       />
 
-      {/* Toolbar di bawah area tulis */}
-      <div className="pt-1">
-        <EditorToolbar exec={exec} />
+      {/* Hint: cara format manual (gaya WhatsApp) */}
+      <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-zinc-300">
+        <div className="mb-1 font-semibold text-zinc-200">Tip format cepat (ketik manual):</div>
+        <ul className="list-disc space-y-1 pl-5">
+          <li>
+            Tebal: ketik <code className="rounded bg-white/10 px-1">*teks*</code>
+          </li>
+          <li>
+            Miring: ketik <code className="rounded bg-white/10 px-1">_teks_</code>
+          </li>
+          <li>
+            Kutipan/abu: awali baris dengan{" "}
+            <code className="rounded bg-white/10 px-1">&gt; </code>
+          </li>
+        </ul>
+        <div className="mt-2 text-[11px] text-zinc-400">
+          (Catatan: ini hanya panduan pengetikan. Output halaman baca mengikuti
+          renderer yang aktif.)
+        </div>
       </div>
     </div>
   );
@@ -439,13 +379,10 @@ export default function WriteChapterClient() {
             </div>
           </div>
 
-          {/* Editor dengan toolbar di bawah */}
+          {/* Editor (tanpa tombol, ada hint) */}
           <div className="mt-4">
             <label className="mb-1 block text-xs text-zinc-400">Isi Bab</label>
             <RichEditor value={contentHTML} onChange={setContentHTML} placeholder="Tulis isi bab di sini…" />
-            <div className="mt-2 text-xs text-zinc-400">
-              Gunakan toolbar untuk format dasar (bold, italic, heading, list, link). Konten disimpan dalam HTML ringan.
-            </div>
           </div>
 
           {/* Notif */}
