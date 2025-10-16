@@ -47,18 +47,17 @@ function mdToHtml(src: string) {
   if (!src) return "";
 
   // Escape dasar
-  let s = src.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   s = s.replace(/\r\n/g, "\n");
 
   // Heading
-  s = s.replace(/^###\s+(.+)$/gm,'<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
-  s = s.replace(/^##\s+(.+)$/gm,'<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
-  s = s.replace(/^#\s+(.+)$/gm,'<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
+  s = s.replace(/^###\s+(.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
+  s = s.replace(/^##\s+(.+)$/gm, '<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
+  s = s.replace(/^#\s+(.+)$/gm,  '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
 
-  // Block code ```
-  s = s.replace(/```([\s\S]*?)```/g,
-    (_m, code) =>
-      `<pre class="my-3 rounded-lg border border-white/10 bg-black/30 p-3 overflow-x-auto"><code>${code}</code></pre>`
+  // Fenced code ```
+  s = s.replace(/```([\s\S]*?)```/g, (_m, code) =>
+    `<pre class="my-3 rounded-lg border border-white/10 bg-black/30 p-3 overflow-x-auto"><code>${code}</code></pre>`
   );
 
   // Inline code
@@ -71,20 +70,22 @@ function mdToHtml(src: string) {
   s = s.replace(/~(?!\s)([^~]+?)(?<!\s)~/g, "<del>$1</del>");         // ~strike~
 
   // Gambar
-  s = s.replace(/!\[(.*?)\]\((.*?)\)/g,
+  s = s.replace(
+    /!\[(.*?)\]\((.*?)\)/g,
     '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
   );
 
-  // ── Blockquote ──
-  // Tambahkan baris kosong di SEBELUM & SESUDAH agar enter “terbaca”.
-  // Juga gabungkan baris blockquote yang berurutan jadi satu <blockquote> dengan <br /> di dalamnya.
+  // ── Blockquote yang toleran spasi kiri ──
+  // - Izinkan spasi sebelum '>'
+  // - Gabungkan beberapa baris quote jadi satu <blockquote> (pakai <br/> di dalam)
+  // - Sisipkan newline kosong sebelum & sesudah agar “enter” sekitar kutipan tidak hilang
   s = s.replace(
-    /((?:^(?:&gt;|>)\s?.*(?:\n|$))+)/gm,
+    /((?:^\s*(?:&gt;|>)\s?.*(?:\n|$))+)/gm,
     (block) => {
       const inner = block
         .trimEnd()
         .split("\n")
-        .map(l => l.replace(/^(?:&gt;|>)\s?/, "")) // buang marker >
+        .map(l => l.replace(/^\s*(?:&gt;|>)\s?/, "")) // buang marker '>'
         .join("<br />");
       return `\n\n<blockquote class="my-3 border-l-2 pl-3 border-white/20 text-zinc-400">${inner}</blockquote>\n\n`;
     }
@@ -93,9 +94,9 @@ function mdToHtml(src: string) {
   // ── Paragraf & enter ──
   const parts = s.split(/\n{2,}/).map(seg => {
     const t = seg.trim();
-    // Jika sudah elemen blok, jangan bungkus <p>
+    // Jangan bungkus elemen blok ke dalam <p>
     if (/^<(h1|h2|h3|blockquote|pre|img)\b/i.test(t)) return t;
-    // Enter tunggal -> <br />
+    // Enter tunggal => <br/>
     return `<p>${t.replace(/\n/g, "<br />")}</p>`;
   });
 
@@ -103,10 +104,10 @@ function mdToHtml(src: string) {
 }
 
 
-/** Deteksi pola "WhatsApp-style" agar kita render via mdToHtml */
+
 function looksLikeWhatsAppMD(s: string) {
   return (
-    /(^|\n)>\s?/.test(s) ||               // quote
+    /(^|\n)\s*>\s?/.test(s) ||            // quote (boleh ada spasi kiri)
     /```[\s\S]*?```/.test(s) ||           // code fence
     /`[^`]+`/.test(s) ||                  // inline code
     /\*(?!\s)[^*]+?(?<!\s)\*/.test(s) ||  // *bold*
@@ -116,6 +117,7 @@ function looksLikeWhatsAppMD(s: string) {
     /!\[.*?\]\(.*?\)/.test(s)             // image
   );
 }
+
 
 /** Util kelas tema */
 function themeCls(isLight: boolean, light: string, dark: string) {
