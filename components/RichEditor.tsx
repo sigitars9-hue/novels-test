@@ -1,30 +1,53 @@
 "use client";
 import React, { useRef } from "react";
 
-/* ---------- Markdown mini → HTML (preview saja) ---------- */
+// GANTI fungsi lama ini
 export function mdToHtml(src: string): string {
   if (!src) return "";
 
-  // Escape basic HTML
-  let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // escape HTML dulu
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // Headings
-  s = s.replace(/^###\s+(.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
-  s = s.replace(/^##\s+(.+)$/gm, '<h2 class="text-xl font-bold mt-5 mb-3">$1</h2>');
-  s = s.replace(/^#\s+(.+)$/gm, '<h1 class="text-2xl font-bold mt-6 mb-4">$1</h1>');
+  // normalisasi newline
+  const text = src.replace(/\r\n/g, "\n").trim();
 
-  // Inline
-  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  s = s.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />');
+  // pecah menjadi blok berdasarkan 1+ baris kosong
+  const blocks = text.split(/\n{2,}/);
 
-  // Paragraphs (dua newline = paragraf baru)
-  s = s.replace(/\r\n/g, "\n");                    // normalisasi newline
-  s = s.replace(/\n{2,}/g, "</p><p>");             // paragraf
-  s = s.replace(/\n/g, "<br>");                    // satu newline = <br>
+  const htmlBlocks = blocks.map((raw) => {
+    let s = esc(raw).trim();
 
-  return `<p>${s}</p>`;
+    // --- Heading di baris yang sama ---
+    if (/^#{1,6}\s+/.test(s)) {
+      const m = s.match(/^(#{1,6})\s+(.+)$/)!;
+      const level = Math.min(6, m[1].length);
+      const body = m[2];
+      const hCls =
+        level === 1
+          ? "text-2xl font-bold mt-6 mb-4"
+          : level === 2
+          ? "text-xl font-bold mt-5 mb-3"
+          : "text-lg font-semibold mt-4 mb-2";
+      return `<h${level} class="${hCls}">${body}</h${level}>`;
+    }
+
+    // --- inline formatting ---
+    s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+    s = s.replace(
+      /!\[(.*?)\]\((.*?)\)/g,
+      '<img src="$2" alt="$1" class="my-3 rounded border border-white/10 max-w-full" />'
+    );
+
+    // satu newline = <br>, lalu bungkus <p>
+    s = s.replace(/\n/g, "<br>");
+    return `<p>${s}</p>`;
+  });
+
+  return htmlBlocks.join("");
 }
+
 
 /* ---------- Tombol toolbar ---------- */
 function ToolbarButton(
