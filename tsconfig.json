@@ -1,23 +1,19 @@
 {
   "compilerOptions": {
-    /* ---------- Output & Target ---------- */
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
 
-    /* ---------- JSX & Module ---------- */
     "jsx": "preserve",
     "module": "ESNext",
     "moduleResolution": "Bundler",
 
-    /* ---------- Path & Base ---------- */
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
     },
 
-    /* ---------- TypeScript Strictness ---------- */
     "strict": true,
-    "forceConsistentCasingInFileNames": true,      // ⟵ mencegah error Hero.tsx vs hero.tsx
+    "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "skipLibCheck": true,
     "allowJs": false,
@@ -26,33 +22,22 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
 
-    /* ---------- Next.js Plugin ---------- */
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "plugins": [{ "name": "next" }],
 
-    /* ---------- Extra Type Safety ---------- */
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+
+    "typeRoots": ["./types", "./node_modules/@types"]   // ⟵ tambah ini
   },
 
-  /* ---------- Folder yang disertakan ---------- */
   "include": [
     "app",
     "components",
     "lib",
-    "types",
+    "types",                     // ⟵ sudah ada, biarin
     "next-env.d.ts",
     ".next/types/**/*.ts"
   ],
-
-  /* ---------- Folder yang diabaikan ---------- */
-  "exclude": [
-    "node_modules",
-    "dist",
-    "build"
-  ]
+  "exclude": ["node_modules", "dist", "build"]
 }
