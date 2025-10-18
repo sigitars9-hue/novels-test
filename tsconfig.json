@@ -1,19 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-
+    "lib": ["dom", "dom.iterable", "esnext"],
     "jsx": "preserve",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "baseUrl": ".",
-    "paths": {
-      "@/*": ["./*"]
-    },
-
+    "paths": { "@/*": ["./*"] },
     "strict": true,
-    "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "skipLibCheck": true,
     "allowJs": false,
@@ -21,23 +15,9 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-
-    "plugins": [{ "name": "next" }],
-
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "allowSyntheticDefaultImports": true,
-
-    "typeRoots": ["./types", "./node_modules/@types"]   // ⟵ tambah ini
+    "forceConsistentCasingInFileNames": true,
+    "plugins": [{ "name": "next" }]
   },
-
-  "include": [
-    "app",
-    "components",
-    "lib",
-    "types",                     // ⟵ sudah ada, biarin
-    "next-env.d.ts",
-    ".next/types/**/*.ts"
-  ],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules", "dist", "build"]
 }
