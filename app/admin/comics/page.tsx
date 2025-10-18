@@ -416,32 +416,16 @@ https://cdn.example/p2.png
           </button>
 
           {/* Tombol navigasi setelah sukses */}
-          {lastChapterId && (
-            <>
-              <Link
-                className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold hover:bg-indigo-500"
-                href={
-                  `/read/${lastChapterId}` +
-                  (lastUnlistedToken ? `?token=${lastUnlistedToken}` : "")
-                }
-                target="_blank"
-              >
-                Lihat Chapter
-              </Link>
+<Link
+  className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold hover:bg-indigo-500"
+  href={
+    `/read/comic/${lastChapterId}` + (lastUnlistedToken ? `?token=${lastUnlistedToken}` : "")
+  }
+  target="_blank"
+>
+  Lihat Chapter
+</Link>
 
-              <Link
-                className="rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold hover:bg-sky-500"
-                href={
-                  selectedComic?.slug
-                    ? `/comics/${selectedComic.slug}`
-                    : `/comics/${comicId}`
-                }
-                target="_blank"
-              >
-                Lihat Komik
-              </Link>
-            </>
-          )}
 
           {msg && <span className="text-sm">{msg}</span>}
         </div>
