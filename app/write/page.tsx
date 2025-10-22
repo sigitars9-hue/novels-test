@@ -148,7 +148,15 @@ export default function WriteMetaPage() {
           </p>
         </div>
       </section>
-
+{/* di bawah paragraf “Lengkapi judul…” tambahkan tombol ke posting komik */}
+<div className="mt-4">
+  <Link
+    href="/write/comic-batch"
+    className="inline-flex items-center gap-2 rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:bg-fuchsia-700"
+  >
+    Post Komik (Batch Link)
+  </Link>
+</div>
       {/* FORM */}
       <main className="mx-auto w-[min(980px,95vw)] px-4 pb-10">
         <div className="mb-4 rounded-xl border border-white/10 bg-zinc-900/50 p-3 text-sm">
