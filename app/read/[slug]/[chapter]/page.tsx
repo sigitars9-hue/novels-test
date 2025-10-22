@@ -161,7 +161,8 @@ export default function ReaderPage({ params }: ReaderPageProps) {
   const [chapter, setChapter] = useState<Chapter | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
+  const [comic, setComic] = useState<any | null>(null);
+  const [images, setImages] = useState<string[]>([]);
   // nav
   const [prevChapter, setPrevChapter] = useState<Chapter | null>(null);
   const [nextChapter, setNextChapter] = useState<Chapter | null>(null);
@@ -211,62 +212,136 @@ export default function ReaderPage({ params }: ReaderPageProps) {
     setLoading(true);
     setErr(null);
 
-    (async () => {
-      try {
-        const { data: n, error: e1 } = await supabase
-          .from("novels")
-          .select("*")
-          .eq("slug", params.slug)
-          .single();
-        if (e1) throw e1;
-        if (!mounted) return;
-        setNovel(n || null);
+(async () => {
+  try {
+    // reset state konten komik
+    setImages([]);
+    setComic(null);
 
-        const num = parseInt(params.chapter, 10);
-        if (n) {
-          const { data: ch, error: e2 } = await supabase
+    // ── Coba NOVEL by slug (tanpa .single/.maybeSingle)
+    const novelQ = await supabase
+      .from("novels")
+      .select("*")
+      .eq("slug", params.slug)
+      .limit(1);
+    const n = novelQ.data?.[0] ?? null;
+
+    if (!mounted) return;
+    setNovel(n);
+
+    const num = Number.parseInt(params.chapter, 10);
+    if (!Number.isFinite(num)) {
+      setErr("Nomor chapter tidak valid.");
+      setLoading(false);
+      return;
+    }
+
+    if (n) {
+      // ── CHAPTER untuk NOVEL
+      const chQ = await supabase
+        .from("chapters")
+        .select("*")
+        .eq("novel_id", (n as any).id)
+        .eq("number", num)
+        .limit(1);
+      const ch = (chQ.data?.[0] as Chapter) ?? null;
+
+      setChapter(ch);
+
+      if (ch?.id) {
+        const [prevQ, nextQ] = await Promise.all([
+          supabase
             .from("chapters")
             .select("*")
             .eq("novel_id", (n as any).id)
-            .eq("number", num)
-            .maybeSingle();
-          if (e2) throw e2;
-          setChapter((ch as Chapter) || null);
-
-          if (ch?.id) {
-            const [prevQ, nextQ] = await Promise.all([
-              supabase
-                .from("chapters")
-                .select("*")
-                .eq("novel_id", (n as any).id)
-                .lt("number", num)
-                .order("number", { ascending: false })
-                .limit(1),
-              supabase
-                .from("chapters")
-                .select("*")
-                .eq("novel_id", (n as any).id)
-                .gt("number", num)
-                .order("number", { ascending: true })
-                .limit(1),
-            ]);
-            setPrevChapter(prevQ.data?.[0] ?? null);
-            setNextChapter(nextQ.data?.[0] ?? null);
-          } else {
-            setPrevChapter(null);
-            setNextChapter(null);
-          }
-        } else {
-          setChapter(null);
-        }
-      } catch (e: any) {
-        if (!mounted) return;
-        setErr(e?.message ?? "Gagal memuat data.");
-      } finally {
-        if (!mounted) return;
-        setLoading(false);
+            .lt("number", num)
+            .order("number", { ascending: false })
+            .limit(1),
+          supabase
+            .from("chapters")
+            .select("*")
+            .eq("novel_id", (n as any).id)
+            .gt("number", num)
+            .order("number", { ascending: true })
+            .limit(1),
+        ]);
+        setPrevChapter(prevQ.data?.[0] ?? null);
+        setNextChapter(nextQ.data?.[0] ?? null);
+      } else {
+        setPrevChapter(null);
+        setNextChapter(null);
       }
-    })();
+    } else {
+      // ── Kalau bukan NOVEL, coba COMIC
+      const comicQ = await supabase
+        .from("comics")
+        .select("*")
+        .eq("slug", params.slug)
+        .limit(1);
+      const c = comicQ.data?.[0] ?? null;
+
+      setComic(c);
+      setNovel(null); // pastikan novel null untuk UI
+
+      if (c) {
+        const chQ = await supabase
+          .from("chapters")
+          .select("id, number, title")
+          .eq("comic_id", (c as any).id)
+          .eq("number", num)
+          .limit(1);
+        const ch = (chQ.data?.[0] as any) ?? null;
+
+        // bikin Chapter minimal biar UI header tetap tampil
+        setChapter(ch ? ({ id: ch.id, number: ch.number, title: ch.title, content: null } as any as Chapter) : null);
+
+if (c && ch) {
+  const imgsQ = await supabase
+    .from("chapter_images")
+    .select("url")
+    .eq("chapter_id", ch.id)
+    .order("page", { ascending: true });
+  setImages(imgsQ.data?.map((r) => r.url) ?? []);
+
+          // prev/next berbasis comic_id
+          const [prevQ, nextQ] = await Promise.all([
+            supabase
+              .from("chapters")
+              .select("*")
+              .eq("comic_id", (c as any).id)
+              .lt("number", num)
+              .order("number", { ascending: false })
+              .limit(1),
+            supabase
+              .from("chapters")
+              .select("*")
+              .eq("comic_id", (c as any).id)
+              .gt("number", num)
+              .order("number", { ascending: true })
+              .limit(1),
+          ]);
+          setPrevChapter(prevQ.data?.[0] ?? null);
+          setNextChapter(nextQ.data?.[0] ?? null);
+        } else {
+          setPrevChapter(null);
+          setNextChapter(null);
+          setImages([]);
+        }
+      } else {
+        // tidak novel, tidak comic
+        setChapter(null);
+        setPrevChapter(null);
+        setNextChapter(null);
+      }
+    }
+  } catch (e: any) {
+    if (!mounted) return;
+    setErr(e?.message ?? "Gagal memuat data.");
+  } finally {
+    if (!mounted) return;
+    setLoading(false);
+  }
+})();
 
     return () => {
       mounted = false;
@@ -478,35 +553,53 @@ export default function ReaderPage({ params }: ReaderPageProps) {
         {!loading && !err && novel && chapter && (
           <>
             {/* Isi bab */}
-            <article className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}>
-              {mode === "html" && (
-                <div
-                  className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
-                  dangerouslySetInnerHTML={{ __html: sanitizedHTML }}
-                />
-              )}
+{/* Isi bab */}
+<article className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}>
+  {/* KOMIK: jika ada images, tampilkan gambar berurutan */}
+  {images.length > 0 && (
+    <div className="flex flex-col gap-4">
+      {images.map((src, i) => (
+        <img
+          key={i}
+          src={src}
+          alt={`Page ${i + 1}`}
+          className="w-full h-auto rounded-lg border border-white/10"
+          loading="lazy"
+        />
+      ))}
+    </div>
+  )}
 
-              {mode === "md-old" && (
-                <div
-                  className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
-                  dangerouslySetInnerHTML={{ __html: mdToHtml(plainForParsing) }}
-                />
-              )}
+  {/* NOVEL: render hanya kalau TIDAK ada images */}
+  {images.length === 0 && mode === "html" && (
+    <div
+      className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
+      dangerouslySetInnerHTML={{ __html: sanitizedHTML }}
+    />
+  )}
 
-              {mode === "text" && (
-                <div className="max-w-none">
-                  {plainForParsing
-                    .replace(/\r\n/g, "\n")
-                    .trim()
-                    .split(/\n\s*\n+/)
-                    .map((p, i) => (
-                      <p key={i} className="mb-4 whitespace-pre-wrap leading-8">
-                        {p}
-                      </p>
-                    ))}
-                </div>
-              )}
-            </article>
+  {images.length === 0 && mode === "md-old" && (
+    <div
+      className={themeCls(isLight, "prose max-w-none", "prose prose-invert max-w-none")}
+      dangerouslySetInnerHTML={{ __html: mdToHtml(plainForParsing) }}
+    />
+  )}
+
+  {images.length === 0 && mode === "text" && (
+    <div className="max-w-none">
+      {plainForParsing
+        .replace(/\r\n/g, "\n")
+        .trim()
+        .split(/\n\s*\n+/)
+        .map((p, i) => (
+          <p key={i} className="mb-4 whitespace-pre-wrap leading-8">
+            {p}
+          </p>
+        ))}
+    </div>
+  )}
+</article>
+
 
             {/* Sentinel untuk dock floating bar */}
             <div ref={dockSentinelRef} className="h-6" />
