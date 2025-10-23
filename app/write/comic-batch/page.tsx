@@ -30,6 +30,22 @@ function slugify(x: string) {
     .slice(0, 80);
 }
 
+/** Ambil SEMUA URL http/https dari teks, rapikan trailing , " ' ) ]  */
+function extractUrls(raw: string): string[] {
+  const m = raw.match(/https?:\/\/[^\s"'>)\],]+/gi) || [];
+  const cleaned = m.map((u) => u.replace(/[,"'\s)\]]+$/g, ""));
+  // unik, pertahankan urutan
+  const seen = new Set<string>();
+  const uniq: string[] = [];
+  for (const u of cleaned) {
+    if (!seen.has(u)) {
+      seen.add(u);
+      uniq.push(u);
+    }
+  }
+  return uniq;
+}
+
 export default function ComicBatchPage() {
   const router = useRouter();
 
@@ -37,41 +53,36 @@ export default function ComicBatchPage() {
 
   // form
   const [comicTitle, setComicTitle] = useState("");
-  const [comicSlug, setComicSlug] = useState(""); // opsional: kalau kosong dibuat dari title
+  const [comicSlug, setComicSlug] = useState(""); // opsional
   const [chapterNumber, setChapterNumber] = useState<number | "">("");
   const [chapterTitle, setChapterTitle] = useState("");
-  const [imageLinks, setImageLinks] = useState(""); // satu URL per baris
+  const [imageLinks, setImageLinks] = useState("");
 
   // ui
+  const [previewOn, setPreviewOn] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<Msg | null>(null);
   const [resultHref, setResultHref] = useState<string | null>(null);
-  const [autoGo, setAutoGo] = useState(true); // auto redirect setelah sukses
+  const [autoGo, setAutoGo] = useState(true);
 
   // login info
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
   }, []);
 
-  // Prefill ?slug=… TANPA useSearchParams / Suspense
+  // Prefill ?slug= tanpa useSearchParams/Suspense
   useEffect(() => {
     if (typeof window === "undefined") return;
     const s = new URLSearchParams(window.location.search).get("slug");
     if (s) setComicSlug(s);
   }, []);
 
-  // Parse links + validasi
-  const lines = useMemo(
-    () =>
-      imageLinks
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean),
+  // Parser link yang toleran
+  const urls = useMemo(() => extractUrls(imageLinks), [imageLinks]);
+  const linesCount = useMemo(
+    () => imageLinks ? imageLinks.split("\n").filter((s) => s.trim().length).length : 0,
     [imageLinks]
   );
-
-  const validUrls = useMemo(() => lines.filter((s) => /^https?:\/\//i.test(s)), [lines]);
-  const invalidCount = lines.length - validUrls.length;
 
   async function handleSubmit() {
     setMsg(null);
@@ -86,21 +97,21 @@ export default function ComicBatchPage() {
       setMsg({ type: "error", text: "Nomor chapter tidak valid." });
       return;
     }
-    if (!validUrls.length) {
+    if (!urls.length) {
       setMsg({
         type: "error",
-        text: "Masukkan minimal satu URL gambar (http/https), satu per baris.",
+        text: "Masukkan minimal satu URL gambar (http/https).",
       });
       return;
     }
 
     setSubmitting(true);
     try {
-      // pastikan profile (pola sama dengan halaman lain)
+      // pastikan profile
       const { error: rpcErr } = await supabase.rpc("ensure_profile");
       if (rpcErr) throw new Error(rpcErr.message || "Gagal memastikan profil.");
 
-      // 1) COMIC: cari atau buat
+      // 1) COMIC
       let finalSlug = comicSlug.trim();
       if (!finalSlug && comicTitle.trim()) finalSlug = slugify(comicTitle);
       if (!finalSlug) throw new Error("Slug komik kosong.");
@@ -124,12 +135,10 @@ export default function ComicBatchPage() {
         if (addErr) throw new Error(addErr.message);
         comicId = newComic.id;
       }
-
       if (!comicId) throw new Error("Gagal mendapatkan ID komik.");
 
-      // 2) CHAPTER: pastikan unik per (comic_id, number)
+      // 2) CHAPTER
       const chNum = Number(chapterNumber);
-
       const { data: existCh } = await supabase
         .from("chapters")
         .select("id")
@@ -149,26 +158,22 @@ export default function ComicBatchPage() {
         if (chErr) throw new Error(chErr.message);
         chapterId = ch.id;
       } else {
-        // replace gambar kalau chapter sudah ada
+        // replace gambar jika sudah ada
         await supabase.from("chapter_images").delete().eq("chapter_id", chapterId);
       }
-
       if (!chapterId) throw new Error("Gagal mendapatkan ID chapter.");
 
       // 3) IMAGES
-      const rows = validUrls.map((url, idx) => ({
+      const rows = urls.map((url, idx) => ({
         chapter_id: chapterId!,
         page: idx + 1,
         url,
       }));
-
       const { error: imgErr } = await supabase.from("chapter_images").insert(rows);
       if (imgErr) throw new Error(imgErr.message);
 
-      // success
       const href = `/read/${finalSlug}/${chNum}`;
       setResultHref(href);
-
       setMsg({
         type: "success",
         text: `Chapter ${chNum} berhasil diposting dengan ${rows.length} halaman.`,
@@ -219,7 +224,7 @@ export default function ComicBatchPage() {
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-fuchsia-300" />
             <span>
-              Isi <code>slug</code> jika ingin pakai komik yang sudah ada. Bila kosong,
+              Isi <code>slug</code> jika ingin pakai komik yang sudah ada. Jika kosong,
               komik baru akan dibuat dari judul.
             </span>
           </div>
@@ -274,13 +279,13 @@ export default function ComicBatchPage() {
           {/* Judul / Slug */}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm opacity-80">Judul Komik</label>
+              <label className="mb-1 block text-sm opacity-80">Judul Komik (jika membuat baru)</label>
               <div className="flex items-center gap-2">
                 <BookOpen className="h-4 w-4 opacity-70" />
                 <input
                   value={comicTitle}
                   onChange={(e) => setComicTitle(e.target.value)}
-                  placeholder="Judul komik (dipakai saat membuat baru)"
+                  placeholder="Judul komik"
                   className="w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 outline-none ring-1 ring-transparent transition focus:ring-fuchsia-500"
                 />
               </div>
@@ -297,7 +302,7 @@ export default function ComicBatchPage() {
                 />
               </div>
               <div className="mt-1 text-xs text-zinc-400">
-                Jika kosong, slug otomatis dibuat dari judul.
+                Jika kosong, slug akan dibuat otomatis dari judul.
               </div>
             </div>
           </div>
@@ -326,37 +331,62 @@ export default function ComicBatchPage() {
             </div>
           </div>
 
-          {/* Links + Preview */}
+          {/* Links + PREVIEW */}
           <div className="grid gap-4 lg:grid-cols-[1fr,380px]">
             <div>
               <label className="mb-1 block text-sm opacity-80">
-                Link Gambar (satu URL per baris, urutan = page 1..N)
+                Link Gambar (satu URL per baris atau array/JSON, urutan = page 1..N)
               </label>
               <textarea
                 value={imageLinks}
                 onChange={(e) => setImageLinks(e.target.value)}
                 rows={12}
                 placeholder={`https://cdn.example.com/komik/ch1/001.jpg
-https://cdn.example.com/komik/ch1/002.jpg
-https://cdn.example.com/komik/ch1/003.jpg`}
+"https://cdn.example.com/komik/ch1/002.jpg",
+"https://cdn.example.com/komik/ch1/003.jpg"`}
                 className="w-full resize-y rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 outline-none ring-1 ring-transparent transition focus:ring-fuchsia-500"
               />
               <div className="mt-1 text-xs text-zinc-400">
-                Baris: {lines.length} · Valid: {validUrls.length}
-                {invalidCount > 0 ? ` · Tidak valid: ${invalidCount}` : ""}
+                Baris: {linesCount} · URL valid terdeteksi: {urls.length}
               </div>
             </div>
 
-            {/* Preview grid */}
+            {/* Panel preview dengan switch */}
             <div className="rounded-xl border border-white/10 bg-zinc-900/60 p-3">
-              <div className="mb-2 text-sm font-semibold opacity-90">Pratinjau</div>
-              {validUrls.length === 0 ? (
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-semibold opacity-90">Pratinjau</div>
+
+                {/* Switch ala novel */}
+                <button
+                  onClick={() => setPreviewOn((v) => !v)}
+                  className={
+                    previewOn
+                      ? "relative h-7 w-12 rounded-full bg-fuchsia-600 transition-colors"
+                      : "relative h-7 w-12 rounded-full bg-zinc-600/60 transition-colors"
+                  }
+                  aria-label="Toggle Preview"
+                >
+                  <span
+                    className={
+                      previewOn
+                        ? "absolute left-[calc(100%-1.65rem)] top-0.5 inline-block h-6 w-6 rounded-full bg-white shadow"
+                        : "absolute left-0.5 top-0.5 inline-block h-6 w-6 rounded-full bg-white shadow"
+                    }
+                  />
+                </button>
+              </div>
+
+              {!previewOn ? (
+                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs opacity-70">
+                  Pratinjau dimatikan.
+                </div>
+              ) : urls.length === 0 ? (
                 <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs opacity-70">
                   Belum ada URL valid.
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                  {validUrls.slice(0, 20).map((u, i) => (
+                  {urls.slice(0, 20).map((u, i) => (
                     <figure key={u + i} className="overflow-hidden rounded-lg border border-white/10">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -372,9 +402,10 @@ https://cdn.example.com/komik/ch1/003.jpg`}
                   ))}
                 </div>
               )}
-              {validUrls.length > 20 && (
+
+              {previewOn && urls.length > 20 && (
                 <div className="mt-2 text-center text-[11px] opacity-70">
-                  +{validUrls.length - 20} lagi…
+                  +{urls.length - 20} lagi…
                 </div>
               )}
             </div>
