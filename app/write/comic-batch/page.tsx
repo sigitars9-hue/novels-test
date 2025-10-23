@@ -2,9 +2,6 @@
 
 // HANYA ini, rapihin jadi boolean:
 export const dynamic = "force-dynamic";
-export const revalidate = false;          // ← ganti dari 0 ke false
-export const fetchCache = "force-no-store";
-
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
