@@ -102,6 +102,61 @@ export default function WritePage() {
   const [cMsg, setCMsg] = useState<Msg | null>(null);
   const [comicSlugSaved, setComicSlugSaved] = useState<string | null>(null);
 
+  // COMIC meta tambahan
+const [cSynopsis, setCSynopsis] = useState("");
+const [cTags, setCTags] = useState<string[]>([]);
+const [cPublish, setCPublish] = useState(true); // auto publish ke homepage
+function toggleCGenre(g: string) {
+  setCTags((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]));
+}
+
+{/* Genre Komik */}
+<div>
+  <label className="mb-1 block text-sm opacity-80">Genre</label>
+  <div className="flex flex-wrap gap-2">
+    {GENRES.map((g) => {
+      const active = cTags.includes(g);
+      return (
+        <button
+          type="button"
+          key={g}
+          onClick={() => toggleCGenre(g)}
+          className={`rounded-full border px-3 py-1.5 text-sm transition ${
+            active
+              ? "border-fuchsia-500 bg-fuchsia-600 text-white shadow-[0_0_0_6px_rgba(217,70,239,0.15)]"
+              : "border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10"
+          }`}
+        >
+          {g}
+        </button>
+      );
+    })}
+  </div>
+  <div className="mt-1 text-xs text-zinc-400">Bisa pilih lebih dari satu.</div>
+</div>
+
+{/* Sinopsis Komik */}
+<div>
+  <label className="mb-1 block text-sm opacity-80">Sinopsis</label>
+  <textarea
+    value={cSynopsis}
+    onChange={(e) => setCSynopsis(e.target.value)}
+    rows={4}
+    placeholder="Ringkasan komik…"
+    className="w-full resize-y rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 outline-none ring-1 ring-transparent transition focus:ring-fuchsia-500"
+  />
+</div>
+
+{/* Publish switch */}
+<label className="mt-2 inline-flex items-center gap-2 text-sm opacity-90">
+  <input
+    type="checkbox"
+    checked={cPublish}
+    onChange={(e) => setCPublish(e.target.checked)}
+  />
+  Tampilkan di beranda setelah disimpan
+</label>
+
   async function uploadCoverIfNeeded_C(): Promise<string | null> {
     if (!cCoverFile) return cCoverUrl.trim() || null;
     const { data: auth } = await supabase.auth.getUser();
@@ -128,41 +183,39 @@ export default function WritePage() {
     if (!finalSlug) return setCMsg({ type: "error", text: "Slug atau Judul komik wajib diisi." });
 
     setCSubmitting(true);
-    try {
-      const { error: rpcErr } = await supabase.rpc("ensure_profile");
-      if (rpcErr) throw new Error(rpcErr.message || "Gagal memastikan profil.");
+try {
+  const { error: rpcErr0 } = await supabase.rpc("ensure_profile");
+  if (rpcErr0) throw new Error(rpcErr0.message || "Gagal memastikan profil.");
 
-      const finalCover = await uploadCoverIfNeeded_C();
+  const finalCover = await uploadCoverIfNeeded_C();
+  let finalSlug = cSlug.trim();
+  if (!finalSlug && cTitle.trim()) finalSlug = slugify(cTitle);
+  if (!finalSlug) throw new Error("Slug komik kosong.");
 
-      // cek ada/buat
-      const { data: exist, error: exErr } = await supabase
-        .from("comics")
-        .select("id, slug")
-        .eq("slug", finalSlug)
-        .limit(1)
-        .maybeSingle();
-      if (exErr) throw new Error(exErr.message);
+  // === Simpan metadata + publish via RPC (mirip novel) ===
+  const { data: savedSlug, error: rpcErr } = await supabase.rpc("save_comic_meta", {
+    p_slug: finalSlug || null,       // null = biar dibentuk dari hint
+    p_title: cTitle.trim() || finalSlug,
+    p_synopsis: cSynopsis.trim() || null,
+    p_cover: finalCover || null,
+    p_tags: cTags.length ? cTags : null,
+    p_slug_hint: cTitle.trim() || finalSlug,
+    p_publish: cPublish,             // kalau true => publish_at = now()
+  });
+  if (rpcErr) throw new Error(rpcErr.message);
 
-      if (!exist) {
-        const { error: insErr } = await supabase.from("comics").insert([{
-          title: cTitle.trim() || finalSlug,
-          slug: finalSlug,
-          cover_url: finalCover ?? null,
-        }]);
-        if (insErr) throw new Error(insErr.message);
-      } else if (finalCover) {
-        // update cover bila user mengupload
-        const { error: upErr } = await supabase.from("comics").update({ cover_url: finalCover }).eq("id", exist.id);
-        if (upErr) throw new Error(upErr.message);
-      }
+  const slugOut = savedSlug as string;
+  setComicSlugSaved(slugOut);
+  setCMsg({
+    type: "success",
+    text: "Metadata komik tersimpan & dipublikasikan. Lanjut unggah halaman.",
+  });
+} catch (e: any) {
+  setCMsg({ type: "error", text: e?.message || "Gagal menyimpan metadata komik." });
+} finally {
+  setCSubmitting(false);
+}
 
-      setComicSlugSaved(finalSlug);
-      setCMsg({ type: "success", text: "Metadata komik tersimpan. Lanjut posting halaman komik." });
-    } catch (e: any) {
-      setCMsg({ type: "error", text: e?.message || "Gagal menyimpan metadata komik." });
-    } finally {
-      setCSubmitting(false);
-    }
   }
 
   /* ---------------- UI ---------------- */
