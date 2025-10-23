@@ -211,137 +211,152 @@ export default function ReaderPage({ params }: ReaderPageProps) {
     let mounted = true;
     setLoading(true);
     setErr(null);
+console.log("ENV URL", process.env.NEXT_PUBLIC_SUPABASE_URL);
 
 (async () => {
   try {
-    // reset state konten komik
+    // reset state agar tidak pakai sisa state lama
     setImages([]);
     setComic(null);
+    setNovel(null);
+    setChapter(null);
+    setPrevChapter(null);
+    setNextChapter(null);
 
-    // ── Coba NOVEL by slug (tanpa .single/.maybeSingle)
-    const novelQ = await supabase
-      .from("novels")
-      .select("*")
-      .eq("slug", params.slug)
-      .limit(1);
-    const n = novelQ.data?.[0] ?? null;
-
-    if (!mounted) return;
-    setNovel(n);
-
-    const num = Number.parseInt(params.chapter, 10);
-    if (!Number.isFinite(num)) {
+    const chapterNum = Number.parseInt(params.chapter, 10);
+    if (!Number.isFinite(chapterNum)) {
       setErr("Nomor chapter tidak valid.");
       setLoading(false);
       return;
     }
 
-    if (n) {
-      // ── CHAPTER untuk NOVEL
+    // ─────────────────────────────────────────────
+    // 1) COMIC FIRST
+    // ─────────────────────────────────────────────
+    const comicQ = await supabase
+      .from("comics")
+      .select("*")
+      .eq("slug", params.slug)
+      .limit(1);
+    if (comicQ.error) throw comicQ.error;
+
+    const comicRow = comicQ.data?.[0] ?? null;
+
+    if (comicRow) {
+      if (!mounted) return;
+      setComic(comicRow);
+
+      // chapter komik
       const chQ = await supabase
         .from("chapters")
         .select("*")
-        .eq("novel_id", (n as any).id)
-        .eq("number", num)
+        .eq("comic_id", comicRow.id)
+        .eq("number", chapterNum)
         .limit(1);
-      const ch = (chQ.data?.[0] as Chapter) ?? null;
+      if (chQ.error) throw chQ.error;
 
-      setChapter(ch);
+      const chRow = (chQ.data?.[0] as Chapter) ?? null;
+      if (!mounted) return;
+      setChapter(chRow);
 
-      if (ch?.id) {
+      if (chRow?.id) {
+        // gambar-gambar (array, NO .single())
+        const imgsQ = await supabase
+          .from("chapter_images")
+          .select("url,page")
+          .eq("chapter_id", chRow.id)
+          .order("page", { ascending: true });
+        if (imgsQ.error) throw imgsQ.error;
+
+        if (!mounted) return;
+        setImages((imgsQ.data ?? []).map((r: any) => r.url));
+
+        // prev / next (berdasar comic_id)
         const [prevQ, nextQ] = await Promise.all([
           supabase
             .from("chapters")
             .select("*")
-            .eq("novel_id", (n as any).id)
-            .lt("number", num)
+            .eq("comic_id", comicRow.id)
+            .lt("number", chapterNum)
             .order("number", { ascending: false })
             .limit(1),
           supabase
             .from("chapters")
             .select("*")
-            .eq("novel_id", (n as any).id)
-            .gt("number", num)
+            .eq("comic_id", comicRow.id)
+            .gt("number", chapterNum)
             .order("number", { ascending: true })
             .limit(1),
         ]);
-        setPrevChapter(prevQ.data?.[0] ?? null);
-        setNextChapter(nextQ.data?.[0] ?? null);
-      } else {
-        setPrevChapter(null);
-        setNextChapter(null);
+
+        if (!mounted) return;
+        setPrevChapter((prevQ.data?.[0] as Chapter) ?? null);
+        setNextChapter((nextQ.data?.[0] as Chapter) ?? null);
       }
-    } else {
-      // ── Kalau bukan NOVEL, coba COMIC
-      const comicQ = await supabase
-        .from("comics")
+
+      return; // ✅ selesai di jalur komik
+    }
+
+    // ─────────────────────────────────────────────
+    // 2) NOVEL fallback
+    // ─────────────────────────────────────────────
+    const novelQ = await supabase
+      .from("novels")
+      .select("*")
+      .eq("slug", params.slug)
+      .limit(1);
+    if (novelQ.error) throw novelQ.error;
+
+    const novelRow = (novelQ.data?.[0] as Novel) ?? null;
+    if (!mounted) return;
+    setNovel(novelRow);
+
+    if (novelRow) {
+      const chQ = await supabase
+        .from("chapters")
         .select("*")
-        .eq("slug", params.slug)
+        .eq("novel_id", novelRow.id)
+        .eq("number", chapterNum)
         .limit(1);
-      const c = comicQ.data?.[0] ?? null;
+      if (chQ.error) throw chQ.error;
 
-      setComic(c);
-      setNovel(null); // pastikan novel null untuk UI
+      const chRow = (chQ.data?.[0] as Chapter) ?? null;
+      if (!mounted) return;
+      setChapter(chRow);
 
-      if (c) {
-        const chQ = await supabase
-          .from("chapters")
-          .select("id, number, title")
-          .eq("comic_id", (c as any).id)
-          .eq("number", num)
-          .limit(1);
-        const ch = (chQ.data?.[0] as any) ?? null;
+      if (chRow?.id) {
+        const [prevQ, nextQ] = await Promise.all([
+          supabase
+            .from("chapters")
+            .select("*")
+            .eq("novel_id", novelRow.id)
+            .lt("number", chapterNum)
+            .order("number", { ascending: false })
+            .limit(1),
+          supabase
+            .from("chapters")
+            .select("*")
+            .eq("novel_id", novelRow.id)
+            .gt("number", chapterNum)
+            .order("number", { ascending: true })
+            .limit(1),
+        ]);
 
-        // bikin Chapter minimal biar UI header tetap tampil
-        setChapter(ch ? ({ id: ch.id, number: ch.number, title: ch.title, content: null } as any as Chapter) : null);
-
-if (c && ch) {
-  const imgsQ = await supabase
-    .from("chapter_images")
-    .select("url")
-    .eq("chapter_id", ch.id)
-    .order("page", { ascending: true });
-  setImages(imgsQ.data?.map((r) => r.url) ?? []);
-
-          // prev/next berbasis comic_id
-          const [prevQ, nextQ] = await Promise.all([
-            supabase
-              .from("chapters")
-              .select("*")
-              .eq("comic_id", (c as any).id)
-              .lt("number", num)
-              .order("number", { ascending: false })
-              .limit(1),
-            supabase
-              .from("chapters")
-              .select("*")
-              .eq("comic_id", (c as any).id)
-              .gt("number", num)
-              .order("number", { ascending: true })
-              .limit(1),
-          ]);
-          setPrevChapter(prevQ.data?.[0] ?? null);
-          setNextChapter(nextQ.data?.[0] ?? null);
-        } else {
-          setPrevChapter(null);
-          setNextChapter(null);
-          setImages([]);
-        }
-      } else {
-        // tidak novel, tidak comic
-        setChapter(null);
-        setPrevChapter(null);
-        setNextChapter(null);
+        if (!mounted) return;
+        setPrevChapter((prevQ.data?.[0] as Chapter) ?? null);
+        setNextChapter((nextQ.data?.[0] as Chapter) ?? null);
       }
     }
   } catch (e: any) {
     if (!mounted) return;
+    console.error(e);
     setErr(e?.message ?? "Gagal memuat data.");
   } finally {
     if (!mounted) return;
     setLoading(false);
   }
 })();
+
 
     return () => {
       mounted = false;

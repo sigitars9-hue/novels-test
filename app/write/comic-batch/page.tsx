@@ -27,6 +27,7 @@ export default function ComicBatchPage() {
   const [chapterNumber, setChapterNumber] = useState<number | ''>('');
   const [chapterTitle, setChapterTitle] = useState('');
   const [imageLinks, setImageLinks] = useState(''); // satu URL per baris
+  const [resultHref, setResultHref] = useState<string | null>(null);
 
   // ui
   const [submitting, setSubmitting] = useState(false);
@@ -49,7 +50,7 @@ export default function ComicBatchPage() {
 
   async function handleSubmit() {
     setMsg(null);
-
+    setResultHref(null); // ← reset link hasil
     // basic validation
     if (!comicTitle.trim() && !comicSlug.trim()) {
       setMsg({ type: 'error', text: 'Isi judul komik atau slug komik.' });
@@ -136,11 +137,14 @@ export default function ComicBatchPage() {
 
       const { error: imgErr } = await supabase.from('chapter_images').insert(rows);
       if (imgErr) throw new Error(imgErr.message);
+const href = `/read/${finalSlug}/${chNum}`;
+setResultHref(href);
 
-      setMsg({
-        type: 'success',
-        text: `Chapter ${chNum} berhasil diposting dengan ${rows.length} halaman.`,
-      });
+setMsg({
+  type: 'success',
+  text: `Chapter ${chNum} berhasil diposting dengan ${rows.length} halaman.`,
+});
+
     } catch (e: any) {
       setMsg({ type: 'error', text: e?.message || 'Gagal memposting komik.' });
     } finally {
@@ -204,6 +208,17 @@ export default function ComicBatchPage() {
                 <Info className="h-4 w-4" />
               )}
               <span>{msg.text}</span>
+              {msg.type === 'success' && resultHref && (
+  <div className="mt-3">
+    <Link
+      href={resultHref}
+      className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-fuchsia-700"
+    >
+      Lihat hasil di reader
+    </Link>
+  </div>
+)}
+
             </div>
           </div>
         )}
